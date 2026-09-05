@@ -1,4 +1,5 @@
 import html
+import os
 import json
 import urllib.parse
 import urllib.request
@@ -255,7 +256,7 @@ class WebsiteServer(ThreadingHTTPServer):
 if __name__ == "__main__":
 
     server = WebsiteServer(
-        ("0.0.0.0", 3000),
+        ("0.0.0.0", int(os.environ.get("PORT", 3000))),
         lambda *args, **kwargs:
             WebsiteHandler(
                 *args,
