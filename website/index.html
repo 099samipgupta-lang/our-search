@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Our Search</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <main class="page">
+
+        <section class="hero">
+            <h1>Our Search</h1>
+
+            <form id="search-form" class="search-box" method="GET" action="/search">
+                <input
+                    id="search-input"
+                    type="search"
+                    placeholder="What do you want to know?"
+                    autocomplete="off"
+                >
+                <button type="submit">Search</button>
+            </form>
+        </section>
+
+        <section id="results-section" class="results-section">
+            <div id="status"></div>
+            <div id="results"></div>
+        </section>
+
+    </main>
+
+    <script src="app.js?v=1007"></script>
+</body>
+</html>
