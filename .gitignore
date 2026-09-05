@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+
+crawl_data/
+crawler_data/
+pages/
+documents/
+
+*_data/
+*_state.json
+crawl_errors.json
+page_urls.json
+
+test_*.py
+test_*/

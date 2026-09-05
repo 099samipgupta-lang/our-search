@@ -1,0 +1,188 @@
+from retrieval.query import QueryParser
+from retrieval.posting_stats import PostingListStats
+
+
+class RetrievalEngine:
+
+    def __init__(
+        self,
+        index_source,
+        query_parser=None
+    ):
+
+        self.index = index_source
+        self.posting_stats = PostingListStats()
+
+        self.query_parser = (
+            query_parser
+            if query_parser is not None
+            else QueryParser()
+        )
+
+    def lookup_term(self, term):
+
+        return self.index.get_postings(
+            term
+        )
+
+    def retrieve_or(self, terms):
+
+        terms = list(terms)
+
+        if not terms:
+            return {}
+
+        candidates = {}
+
+        for term in terms:
+
+            postings = self.lookup_term(
+                term
+            )
+
+            for document_id, positions in (
+                postings.items()
+            ):
+
+                if document_id not in candidates:
+
+                    candidates[
+                        document_id
+                    ] = {
+                        "matched_terms": [],
+                        "positions": {}
+                    }
+
+                candidates[
+                    document_id
+                ]["matched_terms"].append(
+                    term
+                )
+
+                candidates[
+                    document_id
+                ]["positions"][term] = (
+                    positions
+                )
+
+        return candidates
+
+    def retrieve_and(self, terms):
+
+        terms = list(terms)
+
+        if not terms:
+            return {}
+
+        posting_entries = []
+
+        for term in terms:
+
+            postings = self.lookup_term(
+                term
+            )
+
+            if not postings:
+                return {}
+
+            self.posting_stats.record(
+                term,
+                postings
+            )
+
+            posting_entries.append(
+                (
+                    term,
+                    postings,
+                    len(postings)
+                )
+            )
+
+        posting_entries.sort(
+            key=lambda item: item[2]
+        )
+
+        ordered_terms = [
+            item[0]
+            for item in posting_entries
+        ]
+
+        postings_by_term = [
+            item[1]
+            for item in posting_entries
+        ]
+
+        common_documents = set(
+            postings_by_term[0].keys()
+        )
+
+        for postings in postings_by_term[1:]:
+
+            common_documents.intersection_update(
+                postings.keys()
+            )
+
+        candidates = {}
+
+        for document_id in common_documents:
+
+            positions = {}
+
+            for term, postings in zip(
+                ordered_terms,
+                postings_by_term
+            ):
+
+                positions[term] = (
+                    postings[document_id]
+                )
+
+            candidates[
+                document_id
+            ] = {
+                "matched_terms": list(terms),
+                "positions": positions
+            }
+
+        return candidates
+
+    def search(
+        self,
+        query,
+        mode="OR"
+    ):
+
+        terms = self.query_parser.parse_unique(
+            query
+        )
+
+        if mode.upper() == "AND":
+
+            return self.retrieve_and(
+                terms
+            )
+
+        if mode.upper() == "OR":
+
+            return self.retrieve_or(
+                terms
+            )
+
+        raise ValueError(
+            "mode must be AND or OR"
+        )
+
+    def candidate_ids(
+        self,
+        query,
+        mode="OR"
+    ):
+
+        results = self.search(
+            query,
+            mode
+        )
+
+        return sorted(
+            results.keys()
+        )

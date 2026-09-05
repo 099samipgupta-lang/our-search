@@ -1,0 +1,58 @@
+class QueryPlanner:
+    def __init__(self, index_source):
+        self.index = index_source
+
+    def estimate_document_frequency(self, term):
+        stats = getattr(
+            self.index,
+            "posting_stats",
+            None
+        )
+
+        if stats is not None:
+            total = 0
+
+            for segment_id in self.index.list_segments():
+                value = stats.get(
+                    segment_id["segment_id"],
+                    term
+                )
+
+                if value is not None:
+                    total += int(value)
+
+            return total
+
+        postings = self.index.get_postings(term)
+
+        return len(postings)
+
+    def order_terms(self, terms):
+        terms = list(terms)
+
+        estimates = []
+
+        for position, term in enumerate(terms):
+            df = self.estimate_document_frequency(
+                term
+            )
+
+            estimates.append(
+                (
+                    df,
+                    position,
+                    term
+                )
+            )
+
+        estimates.sort(
+            key=lambda item: (
+                item[0],
+                item[1]
+            )
+        )
+
+        return [
+            item[2]
+            for item in estimates
+        ]
