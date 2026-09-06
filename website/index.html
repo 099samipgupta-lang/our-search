@@ -3,34 +3,313 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>Our Search</title>
+
     <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
-    <main class="page">
+<header class="topbar">
 
-        <section class="hero">
-            <h1>Our Search</h1>
+    <div class="brand">
+        <div class="brand-icon"></div>
+        <span>Our Search</span>
+    </div>
 
-            <form id="search-form" class="search-box" method="GET" action="/search">
+    <nav class="navigation">
+        <a class="active" href="/">Home</a>
+        <a href="#">Explore</a>
+        <a href="#">Topics</a>
+        <a href="#">Discover</a>
+        <a href="#">More</a>
+    </nav>
+
+    <div class="top-actions">
+        <button class="theme-button">☼</button>
+        <button class="signin-button">Sign In</button>
+    </div>
+
+</header>
+
+
+<main>
+
+    <section class="hero">
+
+        <div class="hero-content">
+
+            <div class="eyebrow">OUR SEARCH</div>
+
+            <h1>
+                Explore what matters.<br>
+                <span>Discover more.</span>
+            </h1>
+
+            <p>
+                Real-time information. Deeper insights. A more connected world.
+            </p>
+
+            <form class="main-search" method="GET" action="/search">
+
+                <span class="search-icon">⌕</span>
+
                 <input
-                    id="search-input"
+                    name="q"
                     type="search"
-                    placeholder="What do you want to know?"
+                    placeholder="What do you want to explore today?"
                     autocomplete="off"
                 >
-                <button type="submit">Search</button>
+
+                <button type="submit">→</button>
+
             </form>
-        </section>
 
-        <section id="results-section" class="results-section">
-            <div id="status"></div>
-            <div id="results"></div>
-        </section>
+            <div class="category-row">
 
-    </main>
+                <button>🔥 Trending</button>
+                <button>▣ News</button>
+                <button>⚛ Science</button>
+                <button>▣ Technology</button>
+                <button>◎ World</button>
+                <button>🏆 Sports</button>
+                <button>▷ Entertainment</button>
+                <button>••• More</button>
 
-    <script src="app.js?v=1007"></script>
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <section class="dashboard">
+
+        <div class="trending-panel">
+
+            <div class="section-heading">
+                <h2>🔥 Trending Now</h2>
+                <a href="#">See all →</a>
+            </div>
+
+            <div class="story-grid">
+
+                <article class="story-card">
+                    <div class="story-image rocket"></div>
+                    <small>SPACE</small>
+                    <h3>Space exploration</h3>
+                    <div class="story-meta">◷ 2h ago &nbsp; ◉ 1.2M</div>
+                </article>
+
+                <article class="story-card">
+                    <div class="story-image technology"></div>
+                    <small>TECHNOLOGY</small>
+                    <h3>Technology changing the world</h3>
+                    <div class="story-meta">◷ 4h ago &nbsp; ◉ 980K</div>
+                </article>
+
+                <article class="story-card">
+                    <div class="story-image earth"></div>
+                    <small>WORLD</small>
+                    <h3>Our changing planet</h3>
+                    <div class="story-meta">◷ 6h ago &nbsp; ◉ 750K</div>
+                </article>
+
+                <article class="story-card">
+                    <div class="story-image sports"></div>
+                    <small>SPORTS</small>
+                    <h3>What's happening in sports</h3>
+                    <div class="story-meta">◷ 8h ago &nbsp; ◉ 640K</div>
+                </article>
+
+            </div>
+
+        </div>
+
+
+        <aside class="topics-panel">
+
+            <div class="section-heading">
+                <h2>◈ Explore by Topic</h2>
+            </div>
+
+            <div class="topic-list">
+
+                <a href="#">
+                    <span>⚛</span>
+                    <div>
+                        <strong>Science & Nature</strong>
+                        <small>The universe, life, earth and more</small>
+                    </div>
+                    <b>›</b>
+                </a>
+
+                <a href="#">
+                    <span>▣</span>
+                    <div>
+                        <strong>Technology</strong>
+                        <small>Innovation, gadgets and beyond</small>
+                    </div>
+                    <b>›</b>
+                </a>
+
+                <a href="#">
+                    <span>♥</span>
+                    <div>
+                        <strong>Health & Wellness</strong>
+                        <small>Better living, healthier you</small>
+                    </div>
+                    <b>›</b>
+                </a>
+
+                <a href="#">
+                    <span>▤</span>
+                    <div>
+                        <strong>Business & Economy</strong>
+                        <small>Markets, money, opportunities</small>
+                    </div>
+                    <b>›</b>
+                </a>
+
+                <a href="#">
+                    <span>◆</span>
+                    <div>
+                        <strong>Culture & Society</strong>
+                        <small>People, ideas, lifestyle</small>
+                    </div>
+                    <b>›</b>
+                </a>
+
+                <a href="#">
+                    <span>⌂</span>
+                    <div>
+                        <strong>Education</strong>
+                        <small>Learn, grow, achieve</small>
+                    </div>
+                    <b>›</b>
+                </a>
+
+            </div>
+
+        </aside>
+
+
+        <div class="featured-panel">
+
+            <div class="featured-image"></div>
+
+            <div class="featured-content">
+
+                <small>FEATURED</small>
+
+                <h2>Discover the world beyond search</h2>
+
+                <p>
+                    Go deeper with connected topics, real-time updates
+                    and discoveries — all in one place.
+                </p>
+
+                <button>Start Exploring →</button>
+
+            </div>
+
+        </div>
+
+
+        <div class="popular-panel">
+
+            <div class="section-heading">
+                <h2>↗ Popular Searches</h2>
+                <a href="#">See all →</a>
+            </div>
+
+            <div class="popular-list">
+
+                <a href="#">
+                    <strong>1</strong>
+                    <div>
+                        <b>James Webb telescope</b>
+                        <small>Space · Popular</small>
+                    </div>
+                </a>
+
+                <a href="#">
+                    <strong>2</strong>
+                    <div>
+                        <b>Renewable energy</b>
+                        <small>Environment · Popular</small>
+                    </div>
+                </a>
+
+                <a href="#">
+                    <strong>3</strong>
+                    <div>
+                        <b>Space technology</b>
+                        <small>Technology · Popular</small>
+                    </div>
+                </a>
+
+                <a href="#">
+                    <strong>4</strong>
+                    <div>
+                        <b>World events</b>
+                        <small>World · Popular</small>
+                    </div>
+                </a>
+
+                <a href="#">
+                    <strong>5</strong>
+                    <div>
+                        <b>Science discoveries</b>
+                        <small>Science · Popular</small>
+                    </div>
+                </a>
+
+            </div>
+
+        </div>
+
+
+        <aside class="join-panel">
+
+            <div class="join-icon">★</div>
+
+            <h2>Join a more informed world</h2>
+
+            <p>
+                Get personalized updates, save your favorite topics,
+                and be part of a curious global community.
+            </p>
+
+            <button>Create Free Account →</button>
+
+            <small>Already have an account? <a href="#">Sign in</a></small>
+
+        </aside>
+
+    </section>
+
+</main>
+
+
+<footer>
+
+    <div class="footer-brand">
+        <div class="brand-icon"></div>
+        <strong>Our Search</strong>
+    </div>
+
+    <p>Better information. A brighter future.</p>
+
+    <div class="footer-links">
+        <a href="#">About</a>
+        <a href="#">Privacy</a>
+        <a href="#">Terms</a>
+        <a href="#">Contact</a>
+    </div>
+
+</footer>
+
 </body>
 </html>
