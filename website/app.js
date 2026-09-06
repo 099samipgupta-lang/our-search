@@ -1,26 +1,20 @@
 (function () {
     "use strict";
 
-    var searchBar = document.querySelector(".main-search");
-
-    if (!searchBar) {
-        return;
-    }
-
-    searchBar.addEventListener("click", function (event) {
-        event.preventDefault();
-        event.stopPropagation();
-
+    function openSearchPage() {
         fetch("/search.html")
             .then(function (response) {
                 if (!response.ok) {
-                    throw new Error("Unable to load search page");
+                    throw new Error(
+                        "Search page returned HTTP " + response.status
+                    );
                 }
 
                 return response.text();
             })
             .then(function (html) {
                 var parser = new DOMParser();
+
                 var newDocument = parser.parseFromString(
                     html,
                     "text/html"
@@ -28,28 +22,52 @@
 
                 document.title = newDocument.title;
 
-                document.head.innerHTML = newDocument.head.innerHTML;
-                document.body.innerHTML = newDocument.body.innerHTML;
+                document.body.replaceWith(
+                    newDocument.body
+                );
+
+                document.body.className = "search-page";
 
                 window.history.pushState(
-                    {},
+                    { ourSearch: true },
                     "",
                     "/search.html"
                 );
 
                 window.scrollTo(0, 0);
 
-                var input = document.getElementById("search-input");
+                var input =
+                    document.getElementById("search-input");
 
                 if (input) {
-                    input.focus();
+                    setTimeout(function () {
+                        input.focus();
+                    }, 50);
                 }
             })
             .catch(function (error) {
                 console.error(
-                    "Our Search page transition failed:",
+                    "Our Search navigation error:",
                     error
                 );
             });
-    });
+    }
+
+    document.addEventListener(
+        "click",
+        function (event) {
+            var searchButton =
+                event.target.closest(".main-search");
+
+            if (!searchButton) {
+                return;
+            }
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            openSearchPage();
+        },
+        true
+    );
 })();
