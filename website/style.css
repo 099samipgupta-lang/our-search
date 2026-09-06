@@ -29,7 +29,7 @@ body {
             rgba(0, 0, 0, 0.28) 100%),
         url("/assets/earth.jpg");
     background-position: center 65%;
-    background-size: cover;
+    background-size: 100% 100%;
     background-repeat: no-repeat;
     background-attachment: fixed;
 }
