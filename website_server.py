@@ -15,7 +15,9 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
 
-        if self.path.startswith("/search"):
+        parsed = urllib.parse.urlparse(self.path)
+
+        if parsed.path == "/search":
             self.handle_search()
             return
 
