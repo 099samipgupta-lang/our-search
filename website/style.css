@@ -15,14 +15,16 @@
 }
 
 body {
+    margin: 0;
     min-height: 100vh;
-    font-family: Arial, Helvetica, sans-serif;
-    color: var(--text);
-    background:
-        radial-gradient(circle at 15% 15%, rgba(58, 137, 255, 0.18), transparent 32%),
-        radial-gradient(circle at 85% 25%, rgba(135, 91, 255, 0.18), transparent 30%),
-        linear-gradient(145deg, #050c17, #09182a 50%, #050c17);
+    background-color: #020817;
+    background-image: url("/assets/earth.jpg");
+    background-position: center center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
 }
+
 
 a {
     color: inherit;
