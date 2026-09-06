@@ -194,6 +194,42 @@ input {
         0 20px 60px rgba(0,0,0,0.35);
 }
 
+.main-search {
+    text-decoration: none;
+    color: inherit;
+    cursor: pointer;
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.search-placeholder {
+    flex: 1;
+    min-width: 0;
+
+    color: #718097;
+    font-size: 16px;
+
+    text-align: left;
+}
+
+.search-submit {
+    width: 52px;
+    height: 52px;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    flex-shrink: 0;
+
+    border-radius: 14px;
+
+    background: linear-gradient(135deg, var(--blue), var(--purple));
+    color: white;
+
+    font-size: 25px;
+}
+
 .search-icon {
     padding: 0 16px;
     color: #8292a9;
