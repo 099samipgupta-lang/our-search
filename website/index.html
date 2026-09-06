@@ -51,25 +51,21 @@
                 Real-time information. Deeper insights. A more connected world.
             </p>
 
-            <form
+            <a
                 class="main-search"
-                method="GET"
-                action="/search.html"
+                href="/search.html"
+                aria-label="Open Our Search"
             >
 
                 <span class="search-icon">⌕</span>
 
-                <input
-                    name="q"
-                    type="search"
-                    placeholder="What do you want to explore today?"
-                    autocomplete="off"
-                    readonly
-                >
+                <span class="search-placeholder">
+                    What do you want to explore today?
+                </span>
 
-                <button type="submit">→</button>
+                <span class="search-submit">→</span>
 
-            </form>
+            </a>
 
             <div class="category-row">
 
@@ -145,7 +141,6 @@
                         <strong>Culture & Society</strong>
                         <small>People, ideas, lifestyle</small>
                     </div>
-                    <b>›</b>
                 </a>
 
                 <a href="#">
@@ -154,7 +149,6 @@
                         <strong>Education</strong>
                         <small>Learn, grow, achieve</small>
                     </div>
-                    <b>›</b>
                 </a>
 
             </div>
@@ -251,7 +245,10 @@
 
             <button>Create Free Account →</button>
 
-            <small>Already have an account? <a href="#">Sign in</a></small>
+            <small>
+                Already have an account?
+                <a href="#">Sign in</a>
+            </small>
 
         </aside>
 
