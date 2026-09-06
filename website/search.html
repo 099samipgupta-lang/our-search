@@ -13,7 +13,7 @@
 
     <header class="search-header">
 
-        <a href="/" class="search-logo">
+        <a href="/" class="search-logo" aria-label="Our Search home">
             Our Search
         </a>
 
@@ -22,29 +22,62 @@
             method="GET"
             action="/search"
         >
+
+            <span class="search-page-icon" aria-hidden="true">⌕</span>
+
             <input
+                id="search-input"
                 type="search"
                 name="q"
                 placeholder="Search anything..."
                 autocomplete="off"
                 autofocus
+                enterkeyhint="search"
             >
 
-            <button type="submit" aria-label="Search">
-                🔍
+            <button
+                type="submit"
+                aria-label="Search"
+            >
+                →
             </button>
+
         </form>
 
     </header>
 
+
     <main class="search-main">
 
         <div class="search-intro">
+
             <h1>What do you want to explore?</h1>
-            <p>Search the world's information with Our Search.</p>
+
+            <p>
+                Search the world's information with Our Search.
+            </p>
+
         </div>
 
     </main>
+
+
+    <script>
+        window.addEventListener("pageshow", function () {
+            const input = document.getElementById("search-input");
+
+            if (input) {
+                input.focus();
+
+                const length = input.value.length;
+
+                input.setSelectionRange(
+                    length,
+                    length
+                );
+            }
+        });
+    </script>
 
 </body>
 </html>
