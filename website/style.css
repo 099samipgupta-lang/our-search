@@ -154,6 +154,7 @@ input {
     font-size: clamp(42px, 6vw, 76px);
     line-height: 1.03;
     letter-spacing: -3px;
+    color: #ffffff;
 }
 
 .hero h1 span {
