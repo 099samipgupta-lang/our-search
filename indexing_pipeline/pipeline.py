@@ -202,6 +202,14 @@ class CrawlIndexPipeline:
 
         return segment_id
 
+    def index_document(self, document_id, url, title, text, canonical_url=""):
+        result = self.add_document(document_id=document_id, url=url, title=title, text=text, canonical_url=canonical_url)
+        segment_id = None
+        if result.get("action") != "skipped":
+            segment_id = self.flush()
+        result["segment_id"] = segment_id
+        return result
+
     def status(self):
         return {
             "stats": dict(self.stats),

@@ -2,13 +2,15 @@ import json
 
 from search_engine import SearchEngine
 from result_presentation import DocumentStore, ResultAssembler
+from indexing_pipeline.pipeline import CrawlIndexPipeline
 
 
 class SearchService:
-    def __init__(self, index_source, document_store):
+    def __init__(self, index_source, document_store, indexing_pipeline=None):
         self.engine = SearchEngine(index_source)
         self.document_store = document_store
         self.assembler = ResultAssembler(document_store)
+        self.indexing_pipeline = indexing_pipeline
 
     def search(self, query, mode="OR", top_k=10):
         response = self.engine.search(
@@ -45,6 +47,38 @@ class SearchService:
             ],
             "results": assembled["results"],
         }
+
+    def index_document(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be an object")
+
+        document_id = payload.get("document_id")
+        url = payload.get("url")
+        title = payload.get("title", "")
+        text = payload.get("text")
+        canonical_url = payload.get("canonical_url", "")
+
+        if not isinstance(document_id, str) or not document_id:
+            raise ValueError("document_id must be a non-empty string")
+        if not isinstance(url, str) or not url:
+            raise ValueError("url must be a non-empty string")
+        if not isinstance(title, str):
+            raise ValueError("title must be a string")
+        if not isinstance(text, str) or not text:
+            raise ValueError("text must be a non-empty string")
+        if not isinstance(canonical_url, str):
+            raise ValueError("canonical_url must be a string")
+
+        if self.indexing_pipeline is None:
+            raise RuntimeError("indexing pipeline is not configured")
+
+        return self.indexing_pipeline.index_document(
+                document_id=document_id,
+                url=url,
+                title=title,
+                text=text,
+            canonical_url=canonical_url,
+        )
 
     def handle_request(self, payload):
         if not isinstance(payload, dict):
