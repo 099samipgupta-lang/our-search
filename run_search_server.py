@@ -1,3 +1,5 @@
+import os
+
 from search_index.inverted_index import InvertedIndex
 from search_index.persistence.segment_manager import SegmentManager
 from indexing_pipeline.version_state import VersionState
@@ -13,6 +15,7 @@ DOCUMENTS_PATH = "indexing_pipeline_data/documents.json"
 
 
 segment_manager = SegmentManager(INDEX_ROOT)
+
 version_state = VersionState(VERSION_STATE_PATH)
 version_state.load()
 
@@ -32,20 +35,26 @@ service = SearchService(
     document_store,
 )
 
+
+HOST = "0.0.0.0"
+PORT = int(os.environ.get("PORT", "8080"))
+
 server = SearchHTTPServer(
     service,
-    host="127.0.0.1",
-    port=8080,
+    host=HOST,
+    port=PORT,
 )
 
 print("OUR SEARCH SEARCH SERVER")
-print("Running at http://127.0.0.1:8080")
+print(f"Running on {HOST}:{PORT}")
 print("Press Ctrl+C to stop.")
 
 try:
     server.serve_forever()
+
 except KeyboardInterrupt:
     print("\nStopping server...")
+
 finally:
     server.server_close()
     segment_manager.close()
