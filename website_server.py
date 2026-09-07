@@ -6,7 +6,7 @@ import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 
-SEARCH_API = "http://127.0.0.1:8080/search"
+SEARCH_API = "https://my-platform-11.onrender.com/search"
 
 
 class WebsiteHandler(SimpleHTTPRequestHandler):
