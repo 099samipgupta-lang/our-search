@@ -11,6 +11,8 @@ from crawler_system.change_tracker import ChangeTracker
 from crawler_system.sitemap import SitemapDiscovery
 from crawler_system.storage import CrawlStorage
 from crawler_system.frontier import CrawlFrontier
+from indexing_pipeline.crawler_bridge import CrawlerIndexBridge
+from indexing_pipeline.automatic import AutomaticCrawlerIndexer
 
 
 class WholeWebCrawler:
@@ -59,6 +61,10 @@ class WholeWebCrawler:
             document_id_start=1,
             task_timeout=task_timeout,
             max_attempts=max_attempts
+        )
+
+        self.index_integration = AutomaticCrawlerIndexer(
+            CrawlerIndexBridge()
         )
 
         self.seeds = set()

@@ -530,5 +530,8 @@ class SegmentManager:
         )
 
     def close(self):
-
-        self.save_manifest()
+        # Segment metadata is persisted atomically whenever segments
+        # are created, merged, or otherwise changed. Do not rewrite
+        # the manifest here because another process may have created
+        # newer segments since this instance loaded it.
+        return None

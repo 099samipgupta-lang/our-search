@@ -14,24 +14,15 @@ class WorkerCoordinator:
         task_timeout=30,
         max_attempts=3
     ):
-
         self.frontier = frontier
 
         self.pool = WorkerPool(
             worker_count=worker_count
         )
 
-        self.next_document_id = (
-            document_id_start
-        )
-
-        self.task_timeout = float(
-            task_timeout
-        )
-
-        self.max_attempts = int(
-            max_attempts
-        )
+        self.next_document_id = document_id_start
+        self.task_timeout = float(task_timeout)
+        self.max_attempts = int(max_attempts)
 
         self.in_flight = {}
 
@@ -45,45 +36,27 @@ class WorkerCoordinator:
         self.running = False
 
     def _new_document_id(self):
-
-        document_id = (
-            f"DOC-{self.next_document_id:06d}"
-        )
-
+        document_id = f"DOC-{self.next_document_id:06d}"
         self.next_document_id += 1
-
         return document_id
 
     def start(self):
-
         if self.running:
             return
 
         self.pool.start()
-
         self.running = True
 
-    def _dispatch_task(
-        self,
-        task,
-        worker_id
-    ):
+    def _dispatch_task(self, task, worker_id):
+        self.pool.submit(task, worker_id)
 
-        self.pool.submit(
-            task,
-            worker_id
-        )
-
-        self.in_flight[
-            task.document_id
-        ] = {
+        self.in_flight[task.document_id] = {
             "task": task,
             "worker_id": worker_id,
             "started_at": time.monotonic()
         }
 
     def dispatch(self):
-
         if not self.running:
             return 0
 
@@ -94,7 +67,6 @@ class WorkerCoordinator:
         )
 
         for worker_id in available_workers:
-
             url = self.frontier.get_next()
 
             if url is None:
@@ -102,8 +74,7 @@ class WorkerCoordinator:
 
             task = CrawlTask(
                 url=url,
-                document_id=
-                    self._new_document_id()
+                document_id=self._new_document_id()
             )
 
             self._dispatch_task(
@@ -115,45 +86,40 @@ class WorkerCoordinator:
 
         return dispatched
 
-    def _retry_task(
-        self,
-        task
-    ):
-
+    def _retry_task(self, task):
         if task.attempt + 1 >= self.max_attempts:
-
+            self.frontier.complete(task.url)
             self.failed += 1
-
             return False
 
         retry_task = task.retry()
 
         self.retried += 1
 
-        self.frontier.add(
+        released = self.frontier.release(
             retry_task.url,
             priority=retry_task.priority,
             available_at=time.time()
         )
 
+        if not released:
+            self.failed += 1
+            return False
+
         return True
 
     def _handle_dead_workers(self):
-
         dead_workers = (
             self.pool.monitor_workers()
         )
 
         for worker_id in dead_workers:
-
             affected = []
 
             for document_id, lease in list(
                 self.in_flight.items()
             ):
-
                 if lease["worker_id"] == worker_id:
-
                     affected.append(
                         (
                             document_id,
@@ -162,15 +128,12 @@ class WorkerCoordinator:
                     )
 
             for document_id, task in affected:
-
                 self.in_flight.pop(
                     document_id,
                     None
                 )
 
-                self._retry_task(
-                    task
-                )
+                self._retry_task(task)
 
             self.pool.restart_worker(
                 worker_id
@@ -179,21 +142,17 @@ class WorkerCoordinator:
             self.worker_restarts += 1
 
     def _handle_timeouts(self):
-
         now = time.monotonic()
-
         expired = []
 
         for document_id, lease in list(
             self.in_flight.items()
         ):
-
             elapsed = (
                 now - lease["started_at"]
             )
 
             if elapsed >= self.task_timeout:
-
                 expired.append(
                     (
                         document_id,
@@ -202,7 +161,6 @@ class WorkerCoordinator:
                 )
 
         for document_id, lease in expired:
-
             task = lease["task"]
             worker_id = lease["worker_id"]
 
@@ -217,9 +175,7 @@ class WorkerCoordinator:
                 worker_id
             )
 
-            self._retry_task(
-                task
-            )
+            self._retry_task(task)
 
             self.pool.restart_worker(
                 worker_id
@@ -228,19 +184,13 @@ class WorkerCoordinator:
             self.worker_restarts += 1
 
     def monitor(self):
-
         if not self.running:
             return
 
         self._handle_dead_workers()
-
         self._handle_timeouts()
 
-    def collect(
-        self,
-        timeout=0.2
-    ):
-
+    def collect(self, timeout=0.2):
         if not self.running:
             return []
 
@@ -251,15 +201,11 @@ class WorkerCoordinator:
         )
 
         if result is not None:
-
             results.append(
-                self._process_result(
-                    result
-                )
+                self._process_result(result)
             )
 
         while True:
-
             result = self.pool.get_result(
                 timeout=0
             )
@@ -268,9 +214,7 @@ class WorkerCoordinator:
                 break
 
             results.append(
-                self._process_result(
-                    result
-                )
+                self._process_result(result)
             )
 
         return [
@@ -279,39 +223,24 @@ class WorkerCoordinator:
             if result is not None
         ]
 
-    def _process_result(
-        self,
-        result
-    ):
-
-        document_id = (
-            result.task.document_id
-        )
+    def _process_result(self, result):
+        document_id = result.task.document_id
 
         lease = self.in_flight.get(
             document_id
         )
 
         if lease is None:
-
             self.stale_results += 1
-
             return None
 
         current_task = lease["task"]
 
-        if (
-            result.task.attempt
-            != current_task.attempt
-        ):
-
+        if result.task.attempt != current_task.attempt:
             self.stale_results += 1
-
             return None
 
-        worker_id = lease[
-            "worker_id"
-        ]
+        worker_id = lease["worker_id"]
 
         self.in_flight.pop(
             document_id,
@@ -328,11 +257,13 @@ class WorkerCoordinator:
         )
 
         if 200 <= status < 300:
+            self.frontier.complete(
+                result.task.url
+            )
 
             self.completed += 1
 
         else:
-
             self._retry_task(
                 result.task
             )
@@ -340,7 +271,6 @@ class WorkerCoordinator:
         return result
 
     def run_once(self):
-
         if not self.running:
             self.start()
 
@@ -355,73 +285,44 @@ class WorkerCoordinator:
         self.monitor()
 
         return {
-            "dispatched":
-                dispatched,
-
-            "completed":
-                len(results),
-
-            "in_flight":
-                len(self.in_flight),
-
-            "frontier":
-                self.frontier.size(),
-
-            "workers":
-                self.pool.active_workers(),
-
-            "retried":
-                self.retried,
-
-            "timeouts":
-                self.timeouts,
-
-            "worker_restarts":
-                self.worker_restarts,
-
-            "failed":
-                self.failed
+            "dispatched": dispatched,
+            "completed": len(results),
+            "in_flight": len(self.in_flight),
+            "frontier": self.frontier.size(),
+            "workers": self.pool.active_workers(),
+            "retried": self.retried,
+            "timeouts": self.timeouts,
+            "worker_restarts": self.worker_restarts,
+            "failed": self.failed
         }
 
-    def run_until_empty(
-        self,
-        max_cycles=10000
-    ):
-
+    def run_until_empty(self, max_cycles=10000):
         if not self.running:
             self.start()
 
         cycles = 0
 
         while cycles < max_cycles:
-
             cycles += 1
 
             self.monitor()
-
             self.dispatch()
 
             if self.in_flight:
-
                 self.collect(
                     timeout=0.5
                 )
-
             else:
-
                 if self.frontier.size() == 0:
                     break
 
-                time.sleep(
-                    0.05
-                )
+                time.sleep(0.05)
 
         self.monitor()
 
         return self.status()
 
     def stop(self):
-
         if not self.running:
             return
 
@@ -432,38 +333,16 @@ class WorkerCoordinator:
         self.in_flight.clear()
 
     def status(self):
-
         return {
-            "running":
-                self.running,
-
-            "workers":
-                self.pool.active_workers(),
-
-            "worker_status":
-                self.pool.worker_status(),
-
-            "in_flight":
-                len(self.in_flight),
-
-            "completed":
-                self.completed,
-
-            "failed":
-                self.failed,
-
-            "retried":
-                self.retried,
-
-            "timeouts":
-                self.timeouts,
-
-            "worker_restarts":
-                self.worker_restarts,
-
-            "stale_results":
-                self.stale_results,
-
-            "frontier":
-                self.frontier.size()
+            "running": self.running,
+            "workers": self.pool.active_workers(),
+            "worker_status": self.pool.worker_status(),
+            "in_flight": len(self.in_flight),
+            "completed": self.completed,
+            "failed": self.failed,
+            "retried": self.retried,
+            "timeouts": self.timeouts,
+            "worker_restarts": self.worker_restarts,
+            "stale_results": self.stale_results,
+            "frontier": self.frontier.size()
         }
