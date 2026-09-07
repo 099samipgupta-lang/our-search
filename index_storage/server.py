@@ -1,6 +1,8 @@
+import hmac
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from index_storage.local import LocalIndexStorage
 
@@ -22,6 +24,16 @@ PORT = int(
     )
 )
 
+STORAGE_API_KEY = os.environ.get(
+    "OUR_SEARCH_STORAGE_API_KEY",
+)
+
+
+if not STORAGE_API_KEY:
+    raise RuntimeError(
+        "OUR_SEARCH_STORAGE_API_KEY is required"
+    )
+
 
 storage = LocalIndexStorage(
     STORAGE_ROOT
@@ -30,7 +42,33 @@ storage = LocalIndexStorage(
 
 class StorageHTTPHandler(BaseHTTPRequestHandler):
 
-    server_version = "OurSearchStorage/1.0"
+    server_version = "OurSearchStorage/1.1"
+
+    def _authorized(self):
+
+        provided = self.headers.get(
+            "X-Storage-API-Key",
+            "",
+        )
+
+        return hmac.compare_digest(
+            provided,
+            STORAGE_API_KEY,
+        )
+
+    def _require_auth(self):
+
+        if self._authorized():
+            return True
+
+        self._send_json(
+            401,
+            {
+                "error": "unauthorized",
+            },
+        )
+
+        return False
 
     def _send_json(
         self,
@@ -81,23 +119,6 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
         self.wfile.write(data)
 
-    def _read_json(self):
-
-        length = int(
-            self.headers.get(
-                "Content-Length",
-                "0",
-            )
-        )
-
-        body = self.rfile.read(
-            length
-        )
-
-        return json.loads(
-            body.decode("utf-8")
-        )
-
     def _read_body(self):
 
         length = int(
@@ -125,17 +146,18 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             return
 
-        if self.path.startswith(
-            "/exists?key="
-        ):
+        if not self._require_auth():
+            return
 
-            from urllib.parse import parse_qs, urlparse
+        parsed = urlparse(
+            self.path
+        )
 
-            query = parse_qs(
-                urlparse(
-                    self.path
-                ).query
-            )
+        query = parse_qs(
+            parsed.query
+        )
+
+        if parsed.path == "/exists":
 
             key = query.get(
                 "key",
@@ -152,17 +174,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             return
 
-        if self.path.startswith(
-            "/get?key="
-        ):
-
-            from urllib.parse import parse_qs, urlparse
-
-            query = parse_qs(
-                urlparse(
-                    self.path
-                ).query
-            )
+        if parsed.path == "/get":
 
             key = query.get(
                 "key",
@@ -190,17 +202,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             return
 
-        if self.path.startswith(
-            "/list?prefix="
-        ):
-
-            from urllib.parse import parse_qs, urlparse
-
-            query = parse_qs(
-                urlparse(
-                    self.path
-                ).query
-            )
+        if parsed.path == "/list":
 
             prefix = query.get(
                 "prefix",
@@ -227,7 +229,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
     def do_PUT(self):
 
-        if not self.path == "/put":
+        if self.path != "/put":
 
             self._send_json(
                 404,
@@ -238,51 +240,44 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             return
 
-        try:
+        if not self._require_auth():
+            return
 
-            key = self.headers.get(
-                "X-Storage-Key"
-            )
+        key = self.headers.get(
+            "X-Storage-Key",
+            "",
+        )
 
-            if not key:
-
-                self._send_json(
-                    400,
-                    {
-                        "error": "missing_storage_key",
-                    },
-                )
-
-                return
-
-            data = self._read_body()
-
-            storage.put(
-                key,
-                data,
-            )
-
-            self._send_json(
-                200,
-                {
-                    "status": "stored",
-                    "key": key,
-                    "bytes": len(data),
-                },
-            )
-
-        except Exception as error:
+        if not key:
 
             self._send_json(
                 400,
                 {
-                    "error": str(error),
+                    "error": "storage_key_required",
                 },
             )
+
+            return
+
+        data = self._read_body()
+
+        storage.put(
+            key,
+            data,
+        )
+
+        self._send_json(
+            200,
+            {
+                "stored": True,
+                "key": key,
+                "size": len(data),
+            },
+        )
 
     def do_DELETE(self):
 
-        if not self.path == "/delete":
+        if self.path != "/delete":
 
             self._send_json(
                 404,
@@ -293,43 +288,36 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             return
 
-        try:
+        if not self._require_auth():
+            return
 
-            key = self.headers.get(
-                "X-Storage-Key"
-            )
+        key = self.headers.get(
+            "X-Storage-Key",
+            "",
+        )
 
-            if not key:
-
-                self._send_json(
-                    400,
-                    {
-                        "error": "missing_storage_key",
-                    },
-                )
-
-                return
-
-            deleted = storage.delete(
-                key
-            )
-
-            self._send_json(
-                200,
-                {
-                    "deleted": deleted,
-                    "key": key,
-                },
-            )
-
-        except Exception as error:
+        if not key:
 
             self._send_json(
                 400,
                 {
-                    "error": str(error),
+                    "error": "storage_key_required",
                 },
             )
+
+            return
+
+        deleted = storage.delete(
+            key
+        )
+
+        self._send_json(
+            200,
+            {
+                "deleted": deleted,
+                "key": key,
+            },
+        )
 
     def log_message(
         self,
@@ -338,8 +326,11 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
     ):
 
         print(
-            f"[storage] {self.address_string()} "
-            f"{format % args}"
+            "%s - %s"
+            % (
+                self.address_string(),
+                format % args,
+            )
         )
 
 
@@ -362,7 +353,11 @@ def main():
     )
 
     print(
-        f"Storage root: {os.path.abspath(STORAGE_ROOT)}"
+        f"Storage root: {STORAGE_ROOT}"
+    )
+
+    print(
+        "API key authentication: enabled"
     )
 
     print(

@@ -1,8 +1,7 @@
+import json
+from urllib.error import HTTPError
 from urllib.parse import quote
-from urllib.request import (
-    Request,
-    urlopen,
-)
+from urllib.request import Request, urlopen
 
 from index_storage.backend import IndexStorageBackend
 
@@ -12,6 +11,7 @@ class RemoteIndexStorage(IndexStorageBackend):
     def __init__(
         self,
         base_url,
+        api_key=None,
         timeout=30,
     ):
 
@@ -30,18 +30,44 @@ class RemoteIndexStorage(IndexStorageBackend):
                 "base_url must not be empty"
             )
 
+        if api_key is not None and not isinstance(
+            api_key,
+            str,
+        ):
+            raise TypeError(
+                "api_key must be a string or None"
+            )
+
         self.base_url = base_url
-        self.timeout = timeout
+        self.api_key = api_key
+        self.timeout = max(
+            1,
+            int(timeout),
+        )
+
+    def _headers(
+        self,
+        extra=None,
+    ):
+
+        headers = {}
+
+        if self.api_key:
+            headers[
+                "X-Storage-API-Key"
+            ] = self.api_key
+
+        if extra:
+            headers.update(extra)
+
+        return headers
 
     def _url(
         self,
         path,
     ):
 
-        return (
-            self.base_url
-            + path
-        )
+        return self.base_url + path
 
     def put(
         self,
@@ -61,11 +87,13 @@ class RemoteIndexStorage(IndexStorageBackend):
             self._url("/put"),
             data=data,
             method="PUT",
-            headers={
-                "X-Storage-Key": key,
-                "Content-Type":
-                    "application/octet-stream",
-            },
+            headers=self._headers(
+                {
+                    "X-Storage-Key": key,
+                    "Content-Type":
+                        "application/octet-stream",
+                }
+            ),
         )
 
         with urlopen(
@@ -91,6 +119,7 @@ class RemoteIndexStorage(IndexStorageBackend):
         request = Request(
             url,
             method="GET",
+            headers=self._headers(),
         )
 
         try:
@@ -102,14 +131,9 @@ class RemoteIndexStorage(IndexStorageBackend):
 
                 return response.read()
 
-        except Exception as error:
+        except HTTPError as error:
 
-            if getattr(
-                error,
-                "code",
-                None,
-            ) == 404:
-
+            if error.code == 404:
                 return None
 
             raise
@@ -130,14 +154,13 @@ class RemoteIndexStorage(IndexStorageBackend):
         request = Request(
             url,
             method="GET",
+            headers=self._headers(),
         )
 
         with urlopen(
             request,
             timeout=self.timeout,
         ) as response:
-
-            import json
 
             payload = json.loads(
                 response.read().decode(
@@ -157,17 +180,17 @@ class RemoteIndexStorage(IndexStorageBackend):
         request = Request(
             self._url("/delete"),
             method="DELETE",
-            headers={
-                "X-Storage-Key": key,
-            },
+            headers=self._headers(
+                {
+                    "X-Storage-Key": key,
+                }
+            ),
         )
 
         with urlopen(
             request,
             timeout=self.timeout,
         ) as response:
-
-            import json
 
             payload = json.loads(
                 response.read().decode(
@@ -195,14 +218,13 @@ class RemoteIndexStorage(IndexStorageBackend):
         request = Request(
             url,
             method="GET",
+            headers=self._headers(),
         )
 
         with urlopen(
             request,
             timeout=self.timeout,
         ) as response:
-
-            import json
 
             payload = json.loads(
                 response.read().decode(

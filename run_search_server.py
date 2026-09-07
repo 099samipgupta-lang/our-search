@@ -18,8 +18,18 @@ if not STORAGE_URL:
         "OUR_SEARCH_STORAGE_URL is required"
     )
 
+STORAGE_API_KEY = os.environ.get(
+    "OUR_SEARCH_STORAGE_API_KEY"
+)
+
+if not STORAGE_API_KEY:
+    raise RuntimeError(
+        "OUR_SEARCH_STORAGE_API_KEY is required"
+    )
+
 storage = RemoteIndexStorage(
-    STORAGE_URL
+    STORAGE_URL,
+    api_key=STORAGE_API_KEY,
 )
 
 storage_repository = IndexStorageRepository(
@@ -42,6 +52,7 @@ service = SearchService(
 )
 
 HOST = "0.0.0.0"
+
 PORT = int(
     os.environ.get(
         "PORT",
@@ -57,10 +68,8 @@ server = SearchHTTPServer(
 
 print("OUR SEARCH SEARCH SERVER")
 print(f"Running on {HOST}:{PORT}")
-print(
-    "Remote storage:",
-    STORAGE_URL,
-)
+print("Remote storage:", STORAGE_URL)
+print("Remote storage authentication: enabled")
 print("Press Ctrl+C to stop.")
 
 try:
