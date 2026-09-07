@@ -51,6 +51,69 @@ class DocumentStore:
 
         os.replace(temporary_path, self.path)
 
+    def to_bytes(self):
+
+        return json.dumps(
+            self.documents,
+            ensure_ascii=False,
+            separators=(",", ":")
+        ).encode("utf-8")
+
+    def load_bytes(
+        self,
+        payload
+    ):
+
+        if not isinstance(
+            payload,
+            bytes
+        ):
+            raise TypeError(
+                "payload must be bytes"
+            )
+
+        self.documents = json.loads(
+            payload.decode("utf-8")
+        )
+
+        if not isinstance(
+            self.documents,
+            dict
+        ):
+            raise ValueError(
+                "document store data must be an object"
+            )
+
+    def save_to_storage(
+        self,
+        storage,
+        key
+    ):
+
+        storage.put(
+            key,
+            self.to_bytes()
+        )
+
+    def load_from_storage(
+        self,
+        storage,
+        key
+    ):
+
+        payload = storage.get(
+            key
+        )
+
+        if payload is None:
+            return False
+
+        self.load_bytes(
+            payload
+        )
+
+        return True
+
     def load(self):
         if not os.path.exists(self.path):
             return False

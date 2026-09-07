@@ -1,7 +1,6 @@
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
-from indexing_pipeline.pipeline import CrawlIndexPipeline
 
 
 class PageExtractor(HTMLParser):
@@ -103,11 +102,11 @@ class CrawlerIndexBridge:
         pipeline=None,
     ):
 
-        self.pipeline = (
-            pipeline
-            if pipeline is not None
-            else CrawlIndexPipeline()
-        )
+        if pipeline is None:
+            from indexing_pipeline.pipeline import CrawlIndexPipeline
+            pipeline = CrawlIndexPipeline()
+
+        self.pipeline = pipeline
 
         self.processed = 0
         self.indexed = 0

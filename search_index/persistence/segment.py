@@ -128,6 +128,111 @@ class IndexSegment:
 
             raise
 
+    def to_bytes(self):
+
+        encoded = json.dumps(
+            self.data,
+            ensure_ascii=False,
+            separators=(",", ":")
+        ).encode("utf-8")
+
+        checksum = hashlib.sha256(
+            encoded
+        ).hexdigest()
+
+        envelope = {
+            "checksum": checksum,
+            "data": self.data
+        }
+
+        return json.dumps(
+            envelope,
+            ensure_ascii=False,
+            separators=(",", ":")
+        ).encode("utf-8")
+
+    def load_bytes(self, payload):
+
+        if not isinstance(payload, bytes):
+            raise TypeError(
+                "payload must be bytes"
+            )
+
+        envelope = json.loads(
+            payload.decode("utf-8")
+        )
+
+        data = envelope.get(
+            "data"
+        )
+
+        stored_checksum = envelope.get(
+            "checksum"
+        )
+
+        if data is None:
+            raise ValueError(
+                "Invalid segment: missing data"
+            )
+
+        encoded = json.dumps(
+            data,
+            ensure_ascii=False,
+            separators=(",", ":")
+        ).encode("utf-8")
+
+        actual_checksum = hashlib.sha256(
+            encoded
+        ).hexdigest()
+
+        if actual_checksum != stored_checksum:
+            raise ValueError(
+                "Segment checksum mismatch"
+            )
+
+        version = data.get(
+            "format_version"
+        )
+
+        if version != self.FORMAT_VERSION:
+            raise ValueError(
+                f"Unsupported segment format: {version}"
+            )
+
+        self.data = data
+
+        return self.data
+
+    def save_to_storage(
+        self,
+        storage,
+        key
+    ):
+
+        storage.put(
+            key,
+            self.to_bytes()
+        )
+
+    def load_from_storage(
+        self,
+        storage,
+        key
+    ):
+
+        payload = storage.get(
+            key
+        )
+
+        if payload is None:
+            raise FileNotFoundError(
+                key
+            )
+
+        return self.load_bytes(
+            payload
+        )
+
     def load(self):
 
         if not os.path.exists(

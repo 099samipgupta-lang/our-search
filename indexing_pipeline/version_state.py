@@ -73,6 +73,84 @@ class VersionState:
 
         self._atomic_save(data)
 
+    def to_bytes(self):
+
+        data = {
+            "format_version":
+                self.FORMAT_VERSION,
+
+            "documents":
+                self.documents
+        }
+
+        return json.dumps(
+            data,
+            ensure_ascii=False,
+            separators=(",", ":")
+        ).encode("utf-8")
+
+    def load_bytes(
+        self,
+        payload
+    ):
+
+        if not isinstance(
+            payload,
+            bytes
+        ):
+            raise TypeError(
+                "payload must be bytes"
+            )
+
+        data = json.loads(
+            payload.decode("utf-8")
+        )
+
+        if data.get(
+            "format_version"
+        ) != self.FORMAT_VERSION:
+
+            raise ValueError(
+                "Unsupported version state format"
+            )
+
+        self.documents = dict(
+            data.get(
+                "documents",
+                {}
+            )
+        )
+
+    def save_to_storage(
+        self,
+        storage,
+        key
+    ):
+
+        storage.put(
+            key,
+            self.to_bytes()
+        )
+
+    def load_from_storage(
+        self,
+        storage,
+        key
+    ):
+
+        payload = storage.get(
+            key
+        )
+
+        if payload is None:
+            return False
+
+        self.load_bytes(
+            payload
+        )
+
+        return True
+
     def load(self):
 
         if not os.path.exists(self.path):

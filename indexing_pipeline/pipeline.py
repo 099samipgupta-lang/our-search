@@ -10,14 +10,29 @@ from indexing_pipeline.versioned_index import VersionedIndex
 from indexing_pipeline.live_index import LiveVersionedIndex
 from search_index.persistence.maintenance import IndexMaintenance
 from search_index.persistence.auto_maintenance import AutomaticIndexMaintenance
+from index_storage.repository import IndexStorageRepository
 
 
 class CrawlIndexPipeline:
     def __init__(
         self,
         root="indexing_pipeline_data",
+        storage=None,
+        storage_repository=None,
     ):
         self.root = os.path.abspath(root)
+
+        self.storage = storage
+
+        self.storage_repository = (
+            storage_repository
+            if storage_repository is not None
+            else (
+                IndexStorageRepository(storage)
+                if storage is not None
+                else None
+            )
+        )
 
         self.index_root = os.path.join(
             self.root,
@@ -35,18 +50,32 @@ class CrawlIndexPipeline:
         )
 
         self.segment_manager = SegmentManager(
-            self.index_root
+            self.index_root,
+            storage=self.storage,
+            storage_repository=self.storage_repository,
         )
 
-        self.document_store = DocumentStore(
-            self.documents_path
-        )
+        if self.storage_repository is not None:
 
-        self.document_store.load()
+            self.document_store = (
+                self.storage_repository.load_documents()
+            )
 
-        self.version_state = VersionState(
-            self.version_state_path
-        )
+            self.version_state = (
+                self.storage_repository.load_version_state()
+            )
+
+        else:
+
+            self.document_store = DocumentStore(
+                self.documents_path
+            )
+
+            self.document_store.load()
+
+            self.version_state = VersionState(
+                self.version_state_path
+            )
 
         self.indexer = DocumentIndexer()
 
@@ -189,13 +218,30 @@ class CrawlIndexPipeline:
         return True
 
     def flush(self):
-        self.document_store.save()
+
+        if self.storage_repository is not None:
+
+            self.storage_repository.save_documents(
+                self.document_store
+            )
+
+        else:
+
+            self.document_store.save()
 
         segment_id = self.indexer.build_segment(
             self.segment_manager
         )
 
-        self.version_state.save()
+        if self.storage_repository is not None:
+
+            self.storage_repository.save_version_state(
+                self.version_state
+            )
+
+        else:
+
+            self.version_state.save()
 
         if segment_id is not None:
             self.auto_maintenance.check()
@@ -224,6 +270,21 @@ class CrawlIndexPipeline:
         }
 
     def close(self):
-        self.document_store.save()
-        self.version_state.save()
+
+        if self.storage_repository is not None:
+
+            self.storage_repository.save_documents(
+                self.document_store
+            )
+
+            self.storage_repository.save_version_state(
+                self.version_state
+            )
+
+        else:
+
+            self.document_store.save()
+            self.version_state.save()
+
         self.segment_manager.close()
+

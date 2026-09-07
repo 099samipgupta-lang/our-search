@@ -13,10 +13,15 @@ class SegmentManager:
 
     def __init__(
         self,
-        root="search_index_data"
+        root="search_index_data",
+        storage=None,
+        storage_repository=None
     ):
 
         self.root = os.path.abspath(root)
+
+        self.storage = storage
+        self.storage_repository = storage_repository
 
         self.segments_dir = os.path.join(
             self.root,
@@ -91,7 +96,12 @@ class SegmentManager:
             index.get_state()
         )
 
-        segment.save()
+        if self.storage_repository is not None:
+            self.storage_repository.save_segment(
+                segment
+            )
+        else:
+            segment.save()
 
         for term, postings in segment.data.get(
             "terms",
@@ -104,7 +114,12 @@ class SegmentManager:
                 len(postings)
             )
 
-        self.posting_stats.save()
+        if self.storage_repository is not None:
+            self.storage_repository.save_posting_stats(
+                self.posting_stats
+            )
+        else:
+            self.posting_stats.save()
 
         self.segments.append(
             {
@@ -138,6 +153,11 @@ class SegmentManager:
         segment = IndexSegment(
             path
         )
+
+        if self.storage_repository is not None:
+            return self.storage_repository.load_segment(
+                segment_id
+            )
 
         segment.load()
 
@@ -363,7 +383,12 @@ class SegmentManager:
             }
         )
 
-        merged_segment.save()
+        if self.storage_repository is not None:
+            self.storage_repository.save_segment(
+                merged_segment
+            )
+        else:
+            merged_segment.save()
 
         for term, postings in merged_segment.data.get(
             "terms",
@@ -381,7 +406,12 @@ class SegmentManager:
                 old_id
             )
 
-        self.posting_stats.save()
+        if self.storage_repository is not None:
+            self.storage_repository.save_posting_stats(
+                self.posting_stats
+            )
+        else:
+            self.posting_stats.save()
 
         selected_ids = set(
             segment_ids
@@ -414,17 +444,22 @@ class SegmentManager:
 
         for old_id in selected_ids:
 
-            old_path = self._segment_path(
-                old_id
-            )
-
-            if os.path.exists(
-                old_path
-            ):
-
-                os.remove(
-                    old_path
+            if self.storage_repository is not None:
+                self.storage_repository.delete_segment(
+                    old_id
                 )
+
+            else:
+                old_path = self._segment_path(
+                    old_id
+                )
+
+                if os.path.exists(
+                    old_path
+                ):
+                    os.remove(
+                        old_path
+                    )
 
         return new_id
 
@@ -440,6 +475,18 @@ class SegmentManager:
             "segments":
                 self.segments
         }
+
+        manifest_bytes = json.dumps(
+            manifest,
+            ensure_ascii=False,
+            separators=(",", ":")
+        ).encode("utf-8")
+
+        if self.storage_repository is not None:
+            self.storage_repository.save_manifest(
+                manifest_bytes
+            )
+            return
 
         directory = os.path.dirname(
             self.manifest_path
@@ -490,20 +537,32 @@ class SegmentManager:
 
     def load_manifest(self):
 
-        if not os.path.exists(
-            self.manifest_path
-        ):
-            return
+        if self.storage_repository is not None:
+            payload = self.storage_repository.load_manifest()
 
-        with open(
-            self.manifest_path,
-            "r",
-            encoding="utf-8"
-        ) as file:
+            if payload is None:
+                return
 
-            manifest = json.load(
-                file
+            manifest = json.loads(
+                payload.decode("utf-8")
             )
+
+        else:
+
+            if not os.path.exists(
+                self.manifest_path
+            ):
+                return
+
+            with open(
+                self.manifest_path,
+                "r",
+                encoding="utf-8"
+            ) as file:
+
+                manifest = json.load(
+                    file
+                )
 
         version = manifest.get(
             "format_version"

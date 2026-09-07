@@ -167,7 +167,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             result_html += f"""
 <article class="result">
-    <a href="{url}" target="_blank" rel="noopener">
+    <a href="{url}" rel="noopener">
         {title}
     </a>
 
