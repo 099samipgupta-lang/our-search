@@ -12,6 +12,7 @@ from crawler_system.sitemap import SitemapDiscovery
 from crawler_system.storage import CrawlStorage
 from crawler_system.frontier import CrawlFrontier
 from indexing_pipeline.crawler_bridge import CrawlerIndexBridge
+from indexing_pipeline.remote_bridge import RemoteCrawlerIndexBridge
 from indexing_pipeline.automatic import AutomaticCrawlerIndexer
 
 
@@ -23,7 +24,8 @@ class WholeWebCrawler:
         frontier_delay=2,
         task_timeout=60,
         max_attempts=3,
-        storage_root="crawler_storage"
+        storage_root="crawler_storage",
+        index_url=None
     ):
 
         self.normalizer = URLNormalizer()
@@ -63,8 +65,15 @@ class WholeWebCrawler:
             max_attempts=max_attempts
         )
 
+        if index_url is None:
+            index_bridge = CrawlerIndexBridge()
+        else:
+            index_bridge = RemoteCrawlerIndexBridge(
+                index_url
+            )
+
         self.index_integration = AutomaticCrawlerIndexer(
-            CrawlerIndexBridge()
+            index_bridge
         )
 
         self.seeds = set()

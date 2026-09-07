@@ -80,6 +80,42 @@ class SearchService:
             canonical_url=canonical_url,
         )
 
+    def delete_document(self, payload):
+        if not isinstance(payload, dict):
+            raise ValueError("request body must be an object")
+
+        document_id = payload.get("document_id")
+
+        if not isinstance(document_id, str):
+            raise ValueError("document_id must be a string")
+
+        document_id = document_id.strip()
+
+        if not document_id:
+            raise ValueError("document_id must not be empty")
+
+        if self.indexing_pipeline is None:
+            raise ValueError("indexing pipeline is not configured")
+
+        removed = self.indexing_pipeline.remove_document(
+            document_id
+        )
+
+        segment_id = None
+
+        if removed:
+            segment_id = self.indexing_pipeline.flush()
+
+        return {
+            "action": (
+                "deleted"
+                if removed
+                else "not_found"
+            ),
+            "document_id": document_id,
+            "segment_id": segment_id,
+        }
+
     def handle_request(self, payload):
         if not isinstance(payload, dict):
             raise ValueError(

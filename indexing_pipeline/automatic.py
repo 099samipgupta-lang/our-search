@@ -64,10 +64,13 @@ class AutomaticCrawlerIndexer:
 
     def process_deleted(self, document_id):
         try:
-            removed = self.bridge.pipeline.remove_document(document_id)
+            removed = self.bridge.remove_document(
+                document_id
+            )
 
             if removed:
                 self.stats["deleted"] += 1
+                self.flush()
 
             return removed
 

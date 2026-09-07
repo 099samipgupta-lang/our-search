@@ -205,6 +205,10 @@ class CrawlerIndexBridge:
                 "error": str(error),
             }
 
+    def remove_document(self, document_id):
+
+        return self.pipeline.remove_document(document_id)
+
     def flush(self):
 
         return self.pipeline.flush()

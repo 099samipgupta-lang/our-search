@@ -31,7 +31,11 @@ class SearchRequestHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": "not_found"})
 
     def do_POST(self):
-        if self.path not in ("/search", "/index"):
+        if self.path not in (
+            "/search",
+            "/index",
+            "/delete",
+        ):
             self._send_json(404, {"error": "not_found"})
             return
 
@@ -47,6 +51,10 @@ class SearchRequestHandler(BaseHTTPRequestHandler):
 
             if self.path == "/index":
                 result = self.service.index_document(payload)
+
+            elif self.path == "/delete":
+                result = self.service.delete_document(payload)
+
             else:
                 result = self.service.handle_request(payload)
 
