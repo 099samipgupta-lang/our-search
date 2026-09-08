@@ -1,7 +1,7 @@
 import os
 
-from index_storage.remote import RemoteIndexStorage
 from index_storage.repository import IndexStorageRepository
+from index_storage.supabase import SupabaseIndexStorage
 from indexing_pipeline.pipeline import CrawlIndexPipeline
 from search_service.service import SearchService
 from search_service.server import SearchHTTPServer
@@ -9,27 +9,33 @@ from search_service.server import SearchHTTPServer
 
 INDEX_ROOT = "indexing_pipeline_data"
 
-STORAGE_URL = os.environ.get(
-    "OUR_SEARCH_STORAGE_URL"
+SUPABASE_URL = os.environ.get(
+    "SUPABASE_URL"
 )
 
-if not STORAGE_URL:
-    raise RuntimeError(
-        "OUR_SEARCH_STORAGE_URL is required"
-    )
-
-STORAGE_API_KEY = os.environ.get(
-    "OUR_SEARCH_STORAGE_API_KEY"
+SUPABASE_KEY = os.environ.get(
+    "SUPABASE_KEY"
 )
 
-if not STORAGE_API_KEY:
+SUPABASE_BUCKET = os.environ.get(
+    "SUPABASE_BUCKET",
+    "Videos",
+)
+
+if not SUPABASE_URL:
     raise RuntimeError(
-        "OUR_SEARCH_STORAGE_API_KEY is required"
+        "SUPABASE_URL is required"
     )
 
-storage = RemoteIndexStorage(
-    STORAGE_URL,
-    api_key=STORAGE_API_KEY,
+if not SUPABASE_KEY:
+    raise RuntimeError(
+        "SUPABASE_KEY is required"
+    )
+
+storage = SupabaseIndexStorage(
+    project_url=SUPABASE_URL,
+    api_key=SUPABASE_KEY,
+    bucket=SUPABASE_BUCKET,
 )
 
 storage_repository = IndexStorageRepository(
@@ -56,7 +62,7 @@ HOST = "0.0.0.0"
 PORT = int(
     os.environ.get(
         "PORT",
-        "8080",
+        "8082",
     )
 )
 
@@ -68,9 +74,8 @@ server = SearchHTTPServer(
 
 print("OUR SEARCH SEARCH SERVER")
 print(f"Running on {HOST}:{PORT}")
-print("Remote storage:", STORAGE_URL)
-print("Remote storage authentication: enabled")
-print("Press Ctrl+C to stop.")
+print("Storage: Supabase")
+print(f"Bucket: {SUPABASE_BUCKET}")
 
 try:
     server.serve_forever()
