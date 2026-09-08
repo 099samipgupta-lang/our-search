@@ -39,9 +39,16 @@ class CrawlFrontier:
         if domain not in self.domains:
             self.domains[domain] = {
                 "last_crawl_time": 0,
+                "next_allowed_time": 0,
                 "crawl_delay": self.default_delay,
                 "failures": {}
             }
+
+        else:
+            self.domains[domain].setdefault(
+                "next_allowed_time",
+                0
+            )
 
     def _save(self):
         self.storage.save(
@@ -113,11 +120,40 @@ class CrawlFrontier:
 
         data = self.domains[domain]
 
-        return (
-            time.time()
-            - data["last_crawl_time"]
-            >= data["crawl_delay"]
+        now = time.time()
+
+        last_crawl_ready = (
+            data["last_crawl_time"]
+            + data["crawl_delay"]
         )
+
+        reserved_ready = data.get(
+            "next_allowed_time",
+            0
+        )
+
+        return now >= max(
+            last_crawl_ready,
+            reserved_ready
+        )
+
+    def _reserve_domain(self, domain):
+
+        self._ensure_domain(domain)
+
+        data = self.domains[domain]
+
+        now = time.time()
+
+        current_ready = data.get(
+            "next_allowed_time",
+            0
+        )
+
+        data["next_allowed_time"] = max(
+            current_ready,
+            now
+        ) + data["crawl_delay"]
 
     def get_next(self):
 
@@ -186,6 +222,8 @@ class CrawlFrontier:
                 "leased_at": time.time()
             }
 
+            self._reserve_domain(domain)
+
             break
 
         for item in skipped:
@@ -247,7 +285,7 @@ class CrawlFrontier:
             self.heap,
             (
                 -float(new_entry["priority"]),
-                float(new_entry["available_at"]),
+                new_entry["available_at"],
                 new_entry["sequence"],
                 url
             )
@@ -389,7 +427,7 @@ class CrawlFrontier:
     def get_state(self):
 
         return {
-            "version": 2,
+            "version": 3,
             "domains": self.domains,
             "url_entries": self.url_entries,
             "leased_entries": self.leased_entries,
@@ -407,6 +445,28 @@ class CrawlFrontier:
                 {}
             )
         )
+
+        for domain, data in self.domains.items():
+
+            data.setdefault(
+                "next_allowed_time",
+                0
+            )
+
+            data.setdefault(
+                "last_crawl_time",
+                0
+            )
+
+            data.setdefault(
+                "crawl_delay",
+                self.default_delay
+            )
+
+            data.setdefault(
+                "failures",
+                {}
+            )
 
         self.url_entries = dict(
             state.get(
