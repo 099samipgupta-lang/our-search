@@ -11,6 +11,7 @@ from crawler_system.change_tracker import ChangeTracker
 from crawler_system.sitemap import SitemapDiscovery
 from crawler_system.storage import CrawlStorage
 from crawler_system.frontier import CrawlFrontier
+from crawler_system.state_storage import CrawlerStateStorage
 from indexing_pipeline.crawler_bridge import CrawlerIndexBridge
 from indexing_pipeline.remote_bridge import RemoteCrawlerIndexBridge
 from indexing_pipeline.automatic import AutomaticCrawlerIndexer
@@ -50,6 +51,33 @@ class WholeWebCrawler:
 
         self.storage = CrawlStorage(
             root=storage_root
+        )
+
+        self.state_storage = CrawlerStateStorage(
+            storage_root
+        )
+
+        crawler_state = self.state_storage.load()
+
+        self.url_dedup.load_state(
+            crawler_state.get(
+                "url_dedup",
+                []
+            )
+        )
+
+        self.content_dedup.load_state(
+            crawler_state.get(
+                "content_dedup",
+                {}
+            )
+        )
+
+        self.change_tracker.load_state(
+            crawler_state.get(
+                "change_tracker",
+                {}
+            )
         )
 
         frontier_storage_path = (
@@ -209,6 +237,20 @@ class WholeWebCrawler:
             url,
             body
         )
+
+        if 200 <= status < 300 and body:
+            self.change_tracker.register(
+                url,
+                body,
+                status=status,
+                etag=response.get("etag"),
+                last_modified=response.get(
+                    "last_modified"
+                ),
+                final_url=response.get(
+                    "final_url"
+                )
+            )
 
         content_info = self.content_dedup.inspect(
             body,
@@ -400,6 +442,12 @@ class WholeWebCrawler:
 
         if integration is not None:
             integration.flush()
+
+        self.state_storage.save(
+            self.url_dedup,
+            self.content_dedup,
+            self.change_tracker
+        )
 
         self.coordinator.stop()
 
