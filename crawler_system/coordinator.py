@@ -2,6 +2,7 @@ import time
 
 from crawler_system.task import CrawlTask
 from crawler_system.worker_pool import WorkerPool
+from crawler_system.document_identity import DocumentIdentity
 
 
 class WorkerCoordinator:
@@ -10,7 +11,6 @@ class WorkerCoordinator:
         self,
         frontier,
         worker_count=4,
-        document_id_start=1,
         task_timeout=30,
         max_attempts=3
     ):
@@ -20,7 +20,6 @@ class WorkerCoordinator:
             worker_count=worker_count
         )
 
-        self.next_document_id = document_id_start
         self.task_timeout = float(task_timeout)
         self.max_attempts = int(max_attempts)
 
@@ -35,10 +34,9 @@ class WorkerCoordinator:
 
         self.running = False
 
-    def _new_document_id(self):
-        document_id = f"DOC-{self.next_document_id:06d}"
-        self.next_document_id += 1
-        return document_id
+    @staticmethod
+    def _new_document_id(url):
+        return DocumentIdentity.from_url(url)
 
     def start(self):
         if self.running:
@@ -74,7 +72,7 @@ class WorkerCoordinator:
 
             task = CrawlTask(
                 url=url,
-                document_id=self._new_document_id()
+                document_id=self._new_document_id(url)
             )
 
             self._dispatch_task(
@@ -327,9 +325,7 @@ class WorkerCoordinator:
             return
 
         self.pool.stop()
-
         self.running = False
-
         self.in_flight.clear()
 
     def status(self):

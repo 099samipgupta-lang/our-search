@@ -60,7 +60,6 @@ class WholeWebCrawler:
         self.coordinator = WorkerCoordinator(
             self.frontier,
             worker_count=worker_count,
-            document_id_start=1,
             task_timeout=task_timeout,
             max_attempts=max_attempts
         )
@@ -537,6 +536,12 @@ class WholeWebCrawler:
 
     def status(self):
 
+        integration = getattr(
+            self,
+            "index_integration",
+            None
+        )
+
         return {
             "running":
                 self.running,
@@ -559,5 +564,10 @@ class WholeWebCrawler:
                 dict(self.stats),
 
             "storage_pages":
-                self.storage.count_pages()
+                self.storage.count_pages(),
+
+            "indexing":
+                integration.status()
+                if integration is not None
+                else None
         }
