@@ -13,37 +13,30 @@ class SearchRequestHandler(BaseHTTPRequestHandler):
 
         try:
             self.send_response(status_code)
-
             self.send_header(
                 "Content-Type",
                 "application/json; charset=utf-8"
             )
-
             self.send_header(
                 "Content-Length",
                 str(len(body))
             )
-
             self.send_header(
                 "Cache-Control",
                 "no-store"
             )
-
             self.send_header(
                 "Access-Control-Allow-Origin",
                 "*"
             )
-
             self.send_header(
                 "Access-Control-Allow-Methods",
                 "GET, POST, OPTIONS"
             )
-
             self.send_header(
                 "Access-Control-Allow-Headers",
                 "Content-Type"
             )
-
             self.end_headers()
             self.wfile.write(body)
             self.wfile.flush()
@@ -53,32 +46,23 @@ class SearchRequestHandler(BaseHTTPRequestHandler):
             ConnectionResetError,
             ConnectionAbortedError
         ):
-            # The client disconnected before the response
-            # could be completely written.
-            #
-            # This is not a server failure and must NOT
-            # trigger another response.
             return
 
     def do_OPTIONS(self):
         try:
             self.send_response(204)
-
             self.send_header(
                 "Access-Control-Allow-Origin",
                 "*"
             )
-
             self.send_header(
                 "Access-Control-Allow-Methods",
                 "GET, POST, OPTIONS"
             )
-
             self.send_header(
                 "Access-Control-Allow-Headers",
                 "Content-Type"
             )
-
             self.end_headers()
 
         except (
@@ -114,6 +98,7 @@ class SearchRequestHandler(BaseHTTPRequestHandler):
             "/search",
             "/index",
             "/delete",
+            "/flush",
         ):
             self._send_json(
                 404,
@@ -122,6 +107,11 @@ class SearchRequestHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            if self.path == "/flush":
+                result = self.service.flush_index()
+                self._send_json(200, result)
+                return
+
             content_length = int(
                 self.headers.get(
                     "Content-Length",
@@ -184,10 +174,6 @@ class SearchRequestHandler(BaseHTTPRequestHandler):
             ConnectionResetError,
             ConnectionAbortedError
         ):
-            # The requesting client disconnected.
-            #
-            # Do not attempt to send a 500 response because
-            # the connection is already gone.
             return
 
         except Exception as error:
@@ -211,7 +197,6 @@ class SearchHTTPServer:
         port=8080
     ):
         SearchRequestHandler.service = service
-
         self.server = ThreadingHTTPServer(
             (host, port),
             SearchRequestHandler

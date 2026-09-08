@@ -48,13 +48,18 @@ class WholeWebCrawler:
 
         self.sitemap = SitemapDiscovery()
 
-        self.frontier = CrawlFrontier(
-            default_delay=frontier_delay,
-            max_retries=max_attempts
-        )
-
         self.storage = CrawlStorage(
             root=storage_root
+        )
+
+        frontier_storage_path = (
+            f"{storage_root.rstrip('/')}/frontier/state.json"
+        )
+
+        self.frontier = CrawlFrontier(
+            default_delay=frontier_delay,
+            max_retries=max_attempts,
+            storage_path=frontier_storage_path
         )
 
         self.coordinator = WorkerCoordinator(
@@ -178,14 +183,21 @@ class WholeWebCrawler:
 
         response = result.response
 
-        url = response.get(
-            "requested_url",
-            result.task.url
-        )
+        url = result.task.url
 
         status = response.get(
             "status",
             0
+        )
+
+        if not (200 <= status < 300):
+            self.stats[
+                "pages_failed"
+            ] += 1
+
+        content_type = response.get(
+            "content_type",
+            ""
         )
 
         body = response.get(
@@ -193,167 +205,87 @@ class WholeWebCrawler:
             b""
         )
 
-        content_type = response.get(
-            "content_type",
-            ""
+        state = self.change_tracker.check(
+            url,
+            body
         )
 
-        if 200 <= status < 300:
+        content_info = self.content_dedup.inspect(
+            body,
+            content_type
+        )
 
+        exact_duplicate = (
+            content_info["exact_duplicate_of"]
+            is not None
+        )
+
+        if exact_duplicate:
             self.stats[
-                "pages_completed"
+                "exact_duplicates"
             ] += 1
 
-            change = self.change_tracker.check(
-                url,
-                body=body,
-                status=status
+        if (
+            content_info["possible_duplicate_of"]
+            is not None
+        ):
+            self.stats[
+                "possible_duplicates"
+            ] += 1
+
+        self.content_dedup.register(
+            result.task.document_id,
+            body,
+            content_type
+        )
+
+        if state == "NEW":
+            self.stats[
+                "new_pages"
+            ] += 1
+
+        elif state == "CHANGED":
+            self.stats[
+                "changed_pages"
+            ] += 1
+
+        elif state == "UNCHANGED":
+            self.stats[
+                "unchanged_pages"
+            ] += 1
+
+        integration = getattr(
+            self,
+            "index_integration",
+            None
+        )
+
+        if integration is not None:
+            integration.process_success(
+                result,
+                state=state,
+                content_type=content_type,
+                exact_duplicate=bool(
+                    exact_duplicate
+                )
             )
 
-            state = change["state"]
+        if "html" in content_type.lower():
 
-            if state == "NEW":
-
-                self.stats[
-                    "new_pages"
-                ] += 1
-
-            elif state == "CHANGED":
-
-                self.stats[
-                    "changed_pages"
-                ] += 1
-
-            elif state == "UNCHANGED":
-
-                self.stats[
-                    "unchanged_pages"
-                ] += 1
-
-            dedup = self.content_dedup.inspect(
-                body,
-                content_type
-            )
-
-            exact_duplicate = (
-                dedup["exact_duplicate_of"]
-            )
-
-            possible_duplicate = (
-                dedup["possible_duplicate_of"]
-            )
-
-            if exact_duplicate:
-
-                self.stats[
-                    "exact_duplicates"
-                ] += 1
-
-            else:
-
-                self.stats[
-                    "unique_contents"
-                ] += 1
-
-                if possible_duplicate:
-
-                    self.stats[
-                        "possible_duplicates"
-                    ] += 1
-
-                try:
-
-                    self.storage.save_page(
-                        result.task.document_id,
-                        body,
-                        {
-                            "url": url,
-                            "final_url":
-                                response.get(
-                                    "final_url"
-                                ),
-                            "status": status,
-                            "content_type":
-                                content_type,
-                            "change_state":
-                                state,
-                            "raw_hash":
-                                dedup["raw_hash"],
-                            "text_hash":
-                                dedup["text_hash"],
-                            "redirect_chain":
-                                response.get(
-                                    "redirect_chain",
-                                    []
-                                )
-                        }
-                    )
-
-                    self.content_dedup.register(
-                        result.task.document_id,
-                        body,
-                        content_type
-                    )
-
-                except Exception:
-
-                    self.stats[
-                        "storage_errors"
-                    ] += 1
-
-            self.change_tracker.register(
-                url,
-                body,
-                status=status,
-                etag=response.get(
-                    "headers",
-                    {}
-                ).get(
-                    "ETag"
+            discovered = self.discovery.discover(
+                response.get(
+                    "final_url",
+                    url
                 ),
-                last_modified=response.get(
-                    "headers",
-                    {}
-                ).get(
-                    "Last-Modified"
-                ),
-                final_url=response.get(
-                    "final_url"
-                )
+                body
             )
 
-            integration = getattr(
-                self,
-                "index_integration",
-                None
-            )
+            for discovered_url in discovered:
 
-            if integration is not None:
-                integration.process_success(
-                    result,
-                    state=state,
-                    content_type=content_type,
-                    exact_duplicate=bool(
-                        exact_duplicate
-                    )
+                self._add_url(
+                    discovered_url,
+                    source="link"
                 )
-
-            if "html" in content_type.lower():
-
-                discovered = self.discovery.discover(
-                    response.get(
-                        "final_url",
-                        url
-                    ),
-                    body
-                )
-
-                for discovered_url in discovered:
-
-                    self._add_url(
-                        discovered_url,
-                        source="link"
-                    )
 
         elif status in (404, 410):
 
@@ -361,31 +293,14 @@ class WholeWebCrawler:
                 "gone_pages"
             ] += 1
 
-            self.change_tracker.check(
-                url,
-                body=None,
-                status=status
-            )
-
-            self.change_tracker.mark_gone(
-                url
-            )
-
-            integration = getattr(
-                self,
-                "index_integration",
-                None
-            )
-
             if integration is not None:
                 integration.process_deleted(
                     result.task.document_id
                 )
 
-        else:
-
+        if 200 <= status < 300:
             self.stats[
-                "pages_failed"
+                "pages_completed"
             ] += 1
 
     def _discover_sitemaps(self):
@@ -453,15 +368,16 @@ class WholeWebCrawler:
                 max_cycles is not None
                 and cycles > max_cycles
             ):
-
                 break
 
             self.coordinator.monitor()
 
             self.coordinator.dispatch()
 
-            results = self.coordinator.collect(
-                timeout=0.5
+            results = (
+                self.coordinator.collect(
+                    timeout=0.5
+                )
             )
 
             for result in results:
@@ -472,11 +388,22 @@ class WholeWebCrawler:
 
             if (
                 self.frontier.size() == 0
-                and
-                not self.coordinator.in_flight
+                and not self.coordinator.in_flight
             ):
-
                 break
+
+        integration = getattr(
+            self,
+            "index_integration",
+            None
+        )
+
+        if integration is not None:
+            integration.flush()
+
+        self.coordinator.stop()
+
+        self.running = False
 
         return self.status()
 
@@ -500,8 +427,10 @@ class WholeWebCrawler:
 
             self.coordinator.dispatch()
 
-            results = self.coordinator.collect(
-                timeout=0.5
+            results = (
+                self.coordinator.collect(
+                    timeout=0.5
+                )
             )
 
             for result in results:
@@ -512,7 +441,7 @@ class WholeWebCrawler:
 
             time.sleep(
                 max(
-                    0.01,
+                    0.1,
                     float(interval)
                 )
             )
@@ -543,31 +472,28 @@ class WholeWebCrawler:
         )
 
         return {
-            "running":
-                self.running,
-
-            "frontier":
-                self.frontier.size(),
-
-            "workers":
-                self.coordinator.pool.active_workers(),
-
-            "in_flight":
-                len(
-                    self.coordinator.in_flight
-                ),
-
-            "coordinator":
-                self.coordinator.status(),
-
-            "stats":
-                dict(self.stats),
-
-            "storage_pages":
-                self.storage.count_pages(),
-
-            "indexing":
+            "running": self.running,
+            "frontier": self.frontier.size(),
+            "workers": (
+                self.coordinator.worker_count
+                if hasattr(
+                    self.coordinator,
+                    "worker_count"
+                )
+                else 0
+            ),
+            "in_flight": len(
+                self.coordinator.in_flight
+            ),
+            "coordinator": (
+                self.coordinator.status()
+            ),
+            "stats": dict(
+                self.stats
+            ),
+            "indexing": (
                 integration.status()
                 if integration is not None
-                else None
+                else {}
+            )
         }

@@ -26,14 +26,24 @@ class RemoteCrawlerIndexBridge:
         self.index_url = index_url
 
         if index_url.endswith("/index"):
+            base_url = index_url[:-len("/index")]
             self.delete_url = (
-                index_url[:-len("/index")]
+                base_url
                 + "/delete"
             )
+            self.flush_url = (
+                base_url
+                + "/flush"
+            )
         else:
+            base_url = index_url.rstrip("/")
             self.delete_url = (
-                index_url.rstrip("/")
+                base_url
                 + "/delete"
+            )
+            self.flush_url = (
+                base_url
+                + "/flush"
             )
 
         self.timeout = max(
@@ -217,7 +227,17 @@ class RemoteCrawlerIndexBridge:
 
     def flush(self):
 
-        return None
+        result = self._post_json(
+            self.flush_url,
+            {}
+        )
+
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                "flush API returned an invalid response"
+            )
+
+        return result.get("segment_id")
 
     def close(self):
 

@@ -1,5 +1,3 @@
-import json
-
 from search_engine import SearchEngine
 from result_presentation import DocumentStore, ResultAssembler
 from indexing_pipeline.pipeline import CrawlIndexPipeline
@@ -50,7 +48,9 @@ class SearchService:
 
     def index_document(self, payload):
         if not isinstance(payload, dict):
-            raise ValueError("request body must be an object")
+            raise ValueError(
+                "request body must be an object"
+            )
 
         document_id = payload.get("document_id")
         url = payload.get("url")
@@ -59,43 +59,80 @@ class SearchService:
         canonical_url = payload.get("canonical_url", "")
 
         if not isinstance(document_id, str) or not document_id:
-            raise ValueError("document_id must be a non-empty string")
+            raise ValueError(
+                "document_id must be a non-empty string"
+            )
+
         if not isinstance(url, str) or not url:
-            raise ValueError("url must be a non-empty string")
+            raise ValueError(
+                "url must be a non-empty string"
+            )
+
         if not isinstance(title, str):
-            raise ValueError("title must be a string")
+            raise ValueError(
+                "title must be a string"
+            )
+
         if not isinstance(text, str) or not text:
-            raise ValueError("text must be a non-empty string")
+            raise ValueError(
+                "text must be a non-empty string"
+            )
+
         if not isinstance(canonical_url, str):
-            raise ValueError("canonical_url must be a string")
+            raise ValueError(
+                "canonical_url must be a string"
+            )
 
         if self.indexing_pipeline is None:
-            raise RuntimeError("indexing pipeline is not configured")
+            raise RuntimeError(
+                "indexing pipeline is not configured"
+            )
 
         return self.indexing_pipeline.index_document(
-                document_id=document_id,
-                url=url,
-                title=title,
-                text=text,
+            document_id=document_id,
+            url=url,
+            title=title,
+            text=text,
             canonical_url=canonical_url,
         )
 
+    def flush_index(self):
+        if self.indexing_pipeline is None:
+            raise RuntimeError(
+                "indexing pipeline is not configured"
+            )
+
+        segment_id = self.indexing_pipeline.flush()
+
+        return {
+            "action": "flushed",
+            "segment_id": segment_id,
+        }
+
     def delete_document(self, payload):
         if not isinstance(payload, dict):
-            raise ValueError("request body must be an object")
+            raise ValueError(
+                "request body must be an object"
+            )
 
         document_id = payload.get("document_id")
 
         if not isinstance(document_id, str):
-            raise ValueError("document_id must be a string")
+            raise ValueError(
+                "document_id must be a string"
+            )
 
         document_id = document_id.strip()
 
         if not document_id:
-            raise ValueError("document_id must not be empty")
+            raise ValueError(
+                "document_id must not be empty"
+            )
 
         if self.indexing_pipeline is None:
-            raise ValueError("indexing pipeline is not configured")
+            raise ValueError(
+                "indexing pipeline is not configured"
+            )
 
         removed = self.indexing_pipeline.remove_document(
             document_id
@@ -119,7 +156,7 @@ class SearchService:
     def handle_request(self, payload):
         if not isinstance(payload, dict):
             raise ValueError(
-                "request body must be an object"
+                "query must be a valid search request"
             )
 
         query = payload.get("query")
