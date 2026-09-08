@@ -1,6 +1,7 @@
 import json
 import os
 import tempfile
+import threading
 import time
 
 from search_index.persistence.segment import IndexSegment
@@ -51,6 +52,19 @@ class SegmentManager:
 
         self.posting_stats.load()
 
+        # --------------------------------------------------
+        # In-memory segment cache
+        #
+        # Segments are immutable after they are written.
+        # Keeping loaded segments in RAM prevents every search
+        # term from downloading the same segment repeatedly
+        # from persistent storage.
+        # --------------------------------------------------
+
+        self._segment_cache = {}
+
+        self._segment_cache_lock = threading.RLock()
+
         self.load_manifest()
 
     def _segment_path(
@@ -73,6 +87,60 @@ class SegmentManager:
         self.next_segment_number += 1
 
         return segment_id
+
+    # --------------------------------------------------
+    # Segment cache
+    # --------------------------------------------------
+
+    def _get_cached_segment(
+        self,
+        segment_id
+    ):
+
+        with self._segment_cache_lock:
+            return self._segment_cache.get(
+                segment_id
+            )
+
+    def _cache_segment(
+        self,
+        segment_id,
+        segment
+    ):
+
+        with self._segment_cache_lock:
+            self._segment_cache[
+                segment_id
+            ] = segment
+
+        return segment
+
+    def _remove_cached_segment(
+        self,
+        segment_id
+    ):
+
+        with self._segment_cache_lock:
+            self._segment_cache.pop(
+                segment_id,
+                None
+            )
+
+    def _clear_segment_cache(self):
+
+        with self._segment_cache_lock:
+            self._segment_cache.clear()
+
+    def cache_size(self):
+
+        with self._segment_cache_lock:
+            return len(
+                self._segment_cache
+            )
+
+    # --------------------------------------------------
+    # Segment persistence
+    # --------------------------------------------------
 
     def flush_index(
         self,
@@ -137,6 +205,13 @@ class SegmentManager:
             }
         )
 
+        # The segment already exists in memory, so cache it
+        # immediately. Future searches do not need to reload it.
+        self._cache_segment(
+            segment_id,
+            segment
+        )
+
         self.save_manifest()
 
         return segment_id
@@ -145,6 +220,13 @@ class SegmentManager:
         self,
         segment_id
     ):
+
+        cached = self._get_cached_segment(
+            segment_id
+        )
+
+        if cached is not None:
+            return cached
 
         path = self._segment_path(
             segment_id
@@ -155,13 +237,20 @@ class SegmentManager:
         )
 
         if self.storage_repository is not None:
-            return self.storage_repository.load_segment(
+            segment = self.storage_repository.load_segment(
                 segment_id
             )
+        else:
+            segment.load()
 
-        segment.load()
+        return self._cache_segment(
+            segment_id,
+            segment
+        )
 
-        return segment
+    # --------------------------------------------------
+    # Segment metadata
+    # --------------------------------------------------
 
     def list_segments(self):
 
@@ -206,6 +295,10 @@ class SegmentManager:
 
         return total
 
+    # --------------------------------------------------
+    # Retrieval
+    # --------------------------------------------------
+
     def estimate_document_frequency(
         self,
         term
@@ -237,7 +330,9 @@ class SegmentManager:
                 postings.keys()
             )
 
-        return len(document_ids)
+        return len(
+            document_ids
+        )
 
     def get_postings(
         self,
@@ -252,10 +347,8 @@ class SegmentManager:
                 metadata["segment_id"]
             )
 
-            postings = (
-                segment.get_postings(
-                    term
-                )
+            postings = segment.get_postings(
+                term
             )
 
             for document_id, positions in (
@@ -288,10 +381,13 @@ class SegmentManager:
             )
 
             if info is not None:
-
                 return info
 
         return None
+
+    # --------------------------------------------------
+    # Segment merging
+    # --------------------------------------------------
 
     def merge_segments(
         self,
@@ -315,8 +411,7 @@ class SegmentManager:
         selected = [
             item
             for item in self.segments
-            if item["segment_id"]
-            in segment_ids
+            if item["segment_id"] in segment_ids
         ]
 
         if len(selected) < 2:
@@ -402,6 +497,7 @@ class SegmentManager:
             )
 
         for old_id in segment_ids:
+
             self.posting_stats.remove_segment(
                 old_id
             )
@@ -420,8 +516,7 @@ class SegmentManager:
         self.segments = [
             item
             for item in self.segments
-            if item["segment_id"]
-            not in selected_ids
+            if item["segment_id"] not in selected_ids
         ]
 
         self.segments.append(
@@ -440,16 +535,30 @@ class SegmentManager:
             }
         )
 
+        # Cache the newly-created merged segment.
+        self._cache_segment(
+            new_id,
+            merged_segment
+        )
+
+        # Old segments are no longer part of the active manifest.
+        for old_id in selected_ids:
+            self._remove_cached_segment(
+                old_id
+            )
+
         self.save_manifest()
 
         for old_id in selected_ids:
 
             if self.storage_repository is not None:
+
                 self.storage_repository.delete_segment(
                     old_id
                 )
 
             else:
+
                 old_path = self._segment_path(
                     old_id
                 )
@@ -457,11 +566,16 @@ class SegmentManager:
                 if os.path.exists(
                     old_path
                 ):
+
                     os.remove(
                         old_path
                     )
 
         return new_id
+
+    # --------------------------------------------------
+    # Manifest
+    # --------------------------------------------------
 
     def save_manifest(self):
 
@@ -483,9 +597,11 @@ class SegmentManager:
         ).encode("utf-8")
 
         if self.storage_repository is not None:
+
             self.storage_repository.save_manifest(
                 manifest_bytes
             )
+
             return
 
         directory = os.path.dirname(
@@ -538,7 +654,10 @@ class SegmentManager:
     def load_manifest(self):
 
         if self.storage_repository is not None:
-            payload = self.storage_repository.load_manifest()
+
+            payload = (
+                self.storage_repository.load_manifest()
+            )
 
             if payload is None:
                 return
@@ -588,9 +707,15 @@ class SegmentManager:
             )
         )
 
+        # The manifest is authoritative. Any previous cache must
+        # be discarded when the manifest is reloaded.
+        self._clear_segment_cache()
+
     def close(self):
-        # Segment metadata is persisted atomically whenever segments
-        # are created, merged, or otherwise changed. Do not rewrite
-        # the manifest here because another process may have created
-        # newer segments since this instance loaded it.
+
+        # Segment metadata is persisted whenever segments are
+        # created, merged, or otherwise changed.
+        #
+        # Cached segments are intentionally kept only in process
+        # memory and disappear when this process exits.
         return None
