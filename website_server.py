@@ -11,12 +11,14 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 SEARCH_API = "https://my-platform-11.onrender.com/search"
 
 
-class WebsiteHandler(SimpleHTTPRequestHandler):
+def log(message):
+    print(message, flush=True)
 
+
+class WebsiteHandler(SimpleHTTPRequestHandler):
     protocol_version = "HTTP/1.0"
 
     def do_GET(self):
-
         parsed = urllib.parse.urlparse(self.path)
 
         if parsed.path == "/search":
@@ -29,7 +31,6 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             pass
 
     def handle_search(self):
-
         parsed = urllib.parse.urlparse(self.path)
         params = urllib.parse.parse_qs(parsed.query)
 
@@ -49,8 +50,8 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             "top_k": 10
         }).encode("utf-8")
 
-        print(
-            "[SEARCH] Starting API request: "
+        log(
+            f"[SEARCH] Starting API request: "
             f"query={query!r}"
         )
 
@@ -65,8 +66,8 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 method="POST",
             )
 
-            print(
-                "[SEARCH] Sending request to "
+            log(
+                f"[SEARCH] Sending request to: "
                 f"{SEARCH_API}"
             )
 
@@ -75,21 +76,21 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 timeout=30
             ) as response:
 
-                print(
-                    "[SEARCH] API response: "
+                response_body = response.read()
+
+                log(
+                    f"[SEARCH] API response: "
                     f"status={response.status}, "
                     f"reason={response.reason}"
                 )
 
-                print(
-                    "[SEARCH] API response headers: "
+                log(
+                    f"[SEARCH] API response headers: "
                     f"{dict(response.headers)}"
                 )
 
-                response_body = response.read()
-
-                print(
-                    "[SEARCH] API response body bytes: "
+                log(
+                    f"[SEARCH] API response body bytes: "
                     f"{len(response_body)}"
                 )
 
@@ -99,12 +100,15 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             results = data.get("results", [])
 
-            print(
-                "[SEARCH] API request succeeded: "
-                f"results={len(results)}"
+            log(
+                f"[SEARCH] API returned "
+                f"{len(results)} results"
             )
 
-            page = self.render_results(query, results)
+            page = self.render_results(
+                query,
+                results
+            )
 
             body = page.encode("utf-8")
 
@@ -118,10 +122,6 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 str(len(body))
             )
             self.send_header(
-                "Cache-Control",
-                "no-store"
-            )
-            self.send_header(
                 "Connection",
                 "close"
             )
@@ -129,38 +129,43 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             try:
                 self.wfile.write(body)
-                self.wfile.flush()
             except (BrokenPipeError, ConnectionResetError):
                 pass
 
-            self.close_connection = True
-
         except urllib.error.HTTPError as error:
-
-            print(
-                "[SEARCH] API HTTP ERROR: "
+            log(
+                f"[SEARCH] API HTTP ERROR: "
                 f"status={error.code}, "
                 f"reason={error.reason}"
             )
 
-            print(
-                "[SEARCH] API HTTP ERROR headers: "
-                f"{dict(error.headers)}"
-            )
+            try:
+                log(
+                    f"[SEARCH] API HTTP ERROR headers: "
+                    f"{dict(error.headers)}"
+                )
+            except Exception:
+                log(
+                    "[SEARCH] Could not read HTTP error headers"
+                )
 
             try:
                 error_body = error.read().decode(
                     "utf-8",
                     errors="replace"
                 )
-            except Exception:
-                error_body = "<unable to read error body>"
 
-            print(
-                "[SEARCH] API HTTP ERROR body: "
-                f"{error_body[:2000]}"
-            )
+                log(
+                    "[SEARCH] API HTTP ERROR body: "
+                    f"{error_body[:2000]}"
+                )
+            except Exception as body_error:
+                log(
+                    "[SEARCH] Could not read HTTP error body: "
+                    f"{body_error}"
+                )
 
+            log("[SEARCH] API HTTP ERROR traceback:")
             traceback.print_exc()
 
             self.send_search_error(
@@ -168,12 +173,13 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             )
 
         except Exception as error:
-
-            print(
-                "[SEARCH] UNEXPECTED ERROR: "
-                f"{type(error).__name__}: {error}"
+            log(
+                "[SEARCH] Unexpected search error: "
+                f"type={type(error).__name__}, "
+                f"message={error}"
             )
 
+            log("[SEARCH] Unexpected error traceback:")
             traceback.print_exc()
 
             self.send_search_error(
@@ -181,23 +187,78 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             )
 
     def send_search_error(self, message):
+        safe_message = html.escape(message)
 
-        message = html.escape(message)
-
-        body = f"""
-<!DOCTYPE html>
-<html>
+        body = f"""<!DOCTYPE html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Our Search</title>
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>Search Error — Our Search</title>
+
+    <link rel="stylesheet" href="/style.css">
 </head>
-<body>
-    <h1>Our Search</h1>
-    <p>Search error: {message}</p>
-    <p><a href="/">Back</a></p>
+
+<body class="search-page">
+
+    <header class="search-header">
+
+        <a href="/" class="search-logo"
+           aria-label="Our Search home">
+            Our Search
+        </a>
+
+        <form
+            class="search-page-form"
+            method="GET"
+            action="/search"
+        >
+
+            <span
+                class="search-page-icon"
+                aria-hidden="true"
+            >⌕</span>
+
+            <input
+                id="search-input"
+                type="search"
+                name="q"
+                placeholder="Search anything..."
+                autocomplete="off"
+                value=""
+                autofocus
+            >
+
+            <button
+                type="submit"
+                aria-label="Search"
+            >→</button>
+
+        </form>
+
+    </header>
+
+    <main class="search-main">
+
+        <div class="search-intro">
+
+            <h1>Search error</h1>
+
+            <p>
+                {safe_message}
+            </p>
+
+        </div>
+
+    </main>
+
 </body>
 </html>
-""".encode("utf-8")
+"""
+
+        encoded = body.encode("utf-8")
 
         self.send_response(500)
         self.send_header(
@@ -206,7 +267,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         )
         self.send_header(
             "Content-Length",
-            str(len(body))
+            str(len(encoded))
         )
         self.send_header(
             "Connection",
@@ -215,149 +276,238 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
         try:
-            self.wfile.write(body)
-            self.wfile.flush()
+            self.wfile.write(encoded)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-        self.close_connection = True
-
     def render_results(self, query, results):
+        result_items = []
 
-        query_html = html.escape(query)
-
-        result_html = ""
-
-        for item in results:
-
-            url = html.escape(
-                str(item.get("url", ""))
-            )
-
+        for result in results:
             title = html.escape(
                 str(
-                    item.get("title")
-                    or item.get("url")
-                    or ""
+                    result.get(
+                        "title",
+                        "Untitled result"
+                    )
                 )
             )
 
-            snippet = html.escape(
-                str(item.get("snippet") or "")
+            url = str(
+                result.get(
+                    "url",
+                    result.get(
+                        "source_url",
+                        "#"
+                    )
+                )
             )
 
-            result_html += f"""
-<article class="result">
-    <a href="{url}" rel="noopener">
-        {title}
-    </a>
+            safe_url = html.escape(
+                url,
+                quote=True
+            )
 
-    <div class="result-url">
-        {url}
-    </div>
+            description = html.escape(
+                str(
+                    result.get(
+                        "description",
+                        result.get(
+                            "snippet",
+                            ""
+                        )
+                    )
+                )
+            )
 
-    <div class="result-snippet">
-        {snippet}
-    </div>
-</article>
-"""
+            result_items.append(
+                f"""
+                <article class="search-result">
 
-        if not results:
-            result_html = """
-<p>No results found.</p>
-"""
+                    <a
+                        class="search-result-title"
+                        href="{safe_url}"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                    >
+                        {title}
+                    </a>
 
-        return f"""
-<!DOCTYPE html>
+                    <div class="search-result-url">
+                        {safe_url}
+                    </div>
+
+                    <p class="search-result-description">
+                        {description}
+                    </p>
+
+                </article>
+                """
+            )
+
+        results_html = "\n".join(result_items)
+
+        if not results_html:
+            results_html = """
+            <div class="search-no-results">
+                <h2>No results found</h2>
+                <p>Our Search could not find matching results.</p>
+            </div>
+            """
+
+        return f"""<!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
-    <title>Our Search</title>
-    <link rel="stylesheet" href="/style.css">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        {html.escape(query)} — Our Search
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/style.css"
+    >
+
 </head>
 
-<body>
+<body class="search-page">
 
-<main class="page">
+    <header class="search-header">
 
-    <section class="hero">
-
-        <h1>Our Search</h1>
+        <a
+            href="/"
+            class="search-logo"
+            aria-label="Our Search home"
+        >
+            Our Search
+        </a>
 
         <form
-            class="search-box"
+            class="search-page-form"
             method="GET"
             action="/search"
         >
 
+            <span
+                class="search-page-icon"
+                aria-hidden="true"
+            >⌕</span>
+
             <input
-                name="q"
+                id="search-input"
                 type="search"
-                value="{query_html}"
-                placeholder="What do you want to know?"
+                name="q"
+                value="{html.escape(query)}"
+                placeholder="Search anything..."
                 autocomplete="off"
+                enterkeyhint="search"
             >
 
-            <button type="submit">
-                Search
+            <button
+                type="submit"
+                aria-label="Search"
+            >
+                →
             </button>
 
         </form>
 
-    </section>
+    </header>
 
-    <section class="results-section">
 
-        <div id="status">
-            Search results for:
-            <strong>{query_html}</strong>
+    <main class="search-main">
+
+        <div class="search-results">
+
+            <div class="search-results-heading">
+
+                <h1>
+                    Search results
+                </h1>
+
+                <p>
+                    Results for
+                    <strong>
+                        {html.escape(query)}
+                    </strong>
+                </p>
+
+            </div>
+
+            {results_html}
+
         </div>
 
-        <div id="results">
-            {result_html}
-        </div>
+    </main>
 
-    </section>
 
-</main>
+    <script>
+
+        window.addEventListener(
+            "pageshow",
+            function () {{
+
+                const input =
+                    document.getElementById(
+                        "search-input"
+                    );
+
+                if (input) {{
+
+                    input.focus();
+
+                    const length =
+                        input.value.length;
+
+                    input.setSelectionRange(
+                        length,
+                        length
+                    );
+
+                }}
+
+            }}
+        );
+
+    </script>
 
 </body>
-
 </html>
 """
-
-    def log_message(self, format_string, *args):
-        print(format_string % args)
-
-
-class WebsiteServer(ThreadingHTTPServer):
-    allow_reuse_address = True
-    daemon_threads = True
 
 
 if __name__ == "__main__":
 
-    server = WebsiteServer(
-        ("0.0.0.0", int(os.environ.get("PORT", 3000))),
-        lambda *args, **kwargs:
-            WebsiteHandler(
-                *args,
-                directory="website",
-                **kwargs
-            ),
+    port = int(
+        os.environ.get(
+            "PORT",
+            "3000"
+        )
     )
 
-    print("OUR SEARCH WEBSITE")
-    print("Running on Render")
-    print("Press Ctrl+C to stop.")
+    server = ThreadingHTTPServer(
+        ("0.0.0.0", port),
+        WebsiteHandler
+    )
+
+    log(
+        f"Our Search website server "
+        f"running on port {port}"
+    )
 
     try:
         server.serve_forever()
 
     except KeyboardInterrupt:
-        print("\nStopping website...")
+        log("Server stopped.")
 
     finally:
         server.server_close()
