@@ -462,7 +462,6 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
                 if (input) {{
 
-                    input.focus();
 
                     const length =
                         input.value.length;
