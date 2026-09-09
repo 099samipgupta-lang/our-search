@@ -1,19 +1,33 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
+
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>Search — Our Search</title>
 
-    <link rel="stylesheet" href="style.css">
+    <link
+        rel="stylesheet"
+        href="/style.css"
+    >
+
 </head>
 
 <body class="search-page">
 
     <header class="search-header">
 
-        <a href="/" class="search-logo" aria-label="Our Search home">
+        <a
+            href="/"
+            class="search-logo"
+            aria-label="Our Search home"
+        >
             Our Search
         </a>
 
@@ -23,7 +37,10 @@
             action="/search"
         >
 
-            <span class="search-page-icon" aria-hidden="true">⌕</span>
+            <span
+                class="search-page-icon"
+                aria-hidden="true"
+            >⌕</span>
 
             <input
                 id="search-input"
@@ -31,7 +48,6 @@
                 name="q"
                 placeholder="Search anything..."
                 autocomplete="off"
-                autofocus
                 enterkeyhint="search"
             >
 
@@ -60,24 +76,6 @@
         </div>
 
     </main>
-
-
-    <script>
-        window.addEventListener("pageshow", function () {
-            const input = document.getElementById("search-input");
-
-            if (input) {
-                input.focus();
-
-                const length = input.value.length;
-
-                input.setSelectionRange(
-                    length,
-                    length
-                );
-            }
-        });
-    </script>
 
 </body>
 </html>
