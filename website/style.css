@@ -861,13 +861,13 @@ body.search-page {
 
 /* RESULT CARDS */
 
-.result {
+.search-result {
     padding: 22px 0;
 
     border-bottom: 1px solid rgba(255,255,255,0.07);
 }
 
-.result > a {
+.search-result-title {
     display: block;
 
     color: #f4f8ff;
@@ -879,11 +879,11 @@ body.search-page {
     transition: color 0.2s;
 }
 
-.result > a:hover {
+.search-result-title:hover {
     color: var(--blue);
 }
 
-.result-url {
+.search-result-url {
     margin-top: 7px;
 
     color: #52c58a;
@@ -894,7 +894,7 @@ body.search-page {
     overflow-wrap: anywhere;
 }
 
-.result-snippet {
+.search-result-description {
     max-width: 720px;
 
     margin-top: 8px;
@@ -933,15 +933,15 @@ body.search-page {
         font-size: 23px;
     }
 
-    .result {
+    .search-result {
         padding: 19px 0;
     }
 
-    .result > a {
+    .search-result-title {
         font-size: 17px;
     }
 
-    .result-snippet {
+    .search-result-description {
         font-size: 12px;
     }
 }
