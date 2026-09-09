@@ -486,6 +486,13 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
 
+    website_directory = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "website"
+    )
+
+    os.chdir(website_directory)
+
     port = int(
         os.environ.get(
             "PORT",
