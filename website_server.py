@@ -3,6 +3,8 @@ import os
 import json
 import urllib.parse
 import urllib.request
+import urllib.error
+import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 
@@ -47,6 +49,11 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             "top_k": 10
         }).encode("utf-8")
 
+        print(
+            "[SEARCH] Starting API request: "
+            f"query={query!r}"
+        )
+
         try:
             request = urllib.request.Request(
                 SEARCH_API,
@@ -58,15 +65,44 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 method="POST",
             )
 
+            print(
+                "[SEARCH] Sending request to "
+                f"{SEARCH_API}"
+            )
+
             with urllib.request.urlopen(
                 request,
                 timeout=30
             ) as response:
+
+                print(
+                    "[SEARCH] API response: "
+                    f"status={response.status}, "
+                    f"reason={response.reason}"
+                )
+
+                print(
+                    "[SEARCH] API response headers: "
+                    f"{dict(response.headers)}"
+                )
+
+                response_body = response.read()
+
+                print(
+                    "[SEARCH] API response body bytes: "
+                    f"{len(response_body)}"
+                )
+
                 data = json.loads(
-                    response.read().decode("utf-8")
+                    response_body.decode("utf-8")
                 )
 
             results = data.get("results", [])
+
+            print(
+                "[SEARCH] API request succeeded: "
+                f"results={len(results)}"
+            )
 
             page = self.render_results(query, results)
 
@@ -99,11 +135,56 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             self.close_connection = True
 
+        except urllib.error.HTTPError as error:
+
+            print(
+                "[SEARCH] API HTTP ERROR: "
+                f"status={error.code}, "
+                f"reason={error.reason}"
+            )
+
+            print(
+                "[SEARCH] API HTTP ERROR headers: "
+                f"{dict(error.headers)}"
+            )
+
+            try:
+                error_body = error.read().decode(
+                    "utf-8",
+                    errors="replace"
+                )
+            except Exception:
+                error_body = "<unable to read error body>"
+
+            print(
+                "[SEARCH] API HTTP ERROR body: "
+                f"{error_body[:2000]}"
+            )
+
+            traceback.print_exc()
+
+            self.send_search_error(
+                f"HTTP Error {error.code}: {error.reason}"
+            )
+
         except Exception as error:
 
-            message = html.escape(str(error))
+            print(
+                "[SEARCH] UNEXPECTED ERROR: "
+                f"{type(error).__name__}: {error}"
+            )
 
-            body = f"""
+            traceback.print_exc()
+
+            self.send_search_error(
+                str(error)
+            )
+
+    def send_search_error(self, message):
+
+        message = html.escape(message)
+
+        body = f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -118,28 +199,28 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 </html>
 """.encode("utf-8")
 
-            self.send_response(500)
-            self.send_header(
-                "Content-Type",
-                "text/html; charset=utf-8"
-            )
-            self.send_header(
-                "Content-Length",
-                str(len(body))
-            )
-            self.send_header(
-                "Connection",
-                "close"
-            )
-            self.end_headers()
+        self.send_response(500)
+        self.send_header(
+            "Content-Type",
+            "text/html; charset=utf-8"
+        )
+        self.send_header(
+            "Content-Length",
+            str(len(body))
+        )
+        self.send_header(
+            "Connection",
+            "close"
+        )
+        self.end_headers()
 
-            try:
-                self.wfile.write(body)
-                self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                pass
+        try:
+            self.wfile.write(body)
+            self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
-            self.close_connection = True
+        self.close_connection = True
 
     def render_results(self, query, results):
 
@@ -243,6 +324,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 </main>
 
 </body>
+
 </html>
 """
 
