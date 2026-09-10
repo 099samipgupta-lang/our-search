@@ -1,683 +1,621 @@
 import html
 import json
 import os
-import time
 import traceback
-import urllib.error
-import urllib.parse
-import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
+
+from index_storage.repository import IndexStorageRepository
+from index_storage.supabase import SupabaseIndexStorage
+from indexing_pipeline.pipeline import CrawlIndexPipeline
+from search_service.service import SearchService
 
 
-SEARCH_API = "https://my-platform-11.onrender.com/search"
-SEARCH_API_HEALTH = "https://my-platform-11.onrender.com/health"
+# ------------------------------------------------------------
+# Repository paths
+# ------------------------------------------------------------
 
-API_TIMEOUT = 30
+REPOSITORY_ROOT = os.path.dirname(
+    os.path.abspath(__file__)
+)
 
-# Render Free services can take a while to wake.
-# We give the service a controlled readiness window
-# instead of exposing the cold-start error to the user.
-WAKE_TIMEOUT = 90
+WEBSITE_DIRECTORY = os.path.join(
+    REPOSITORY_ROOT,
+    "website",
+)
 
-# Delay between wake/readiness attempts.
-WAKE_RETRY_DELAY = 3
+INDEX_ROOT = os.path.join(
+    REPOSITORY_ROOT,
+    "indexing_pipeline_data",
+)
 
-# Delay between transient search API failures.
-SEARCH_RETRY_DELAY = 3
+
+# ------------------------------------------------------------
+# Supabase configuration
+# ------------------------------------------------------------
+
+SUPABASE_URL = os.environ.get(
+    "SUPABASE_URL"
+)
+
+SUPABASE_KEY = os.environ.get(
+    "SUPABASE_KEY"
+)
+
+SUPABASE_BUCKET = os.environ.get(
+    "SUPABASE_BUCKET",
+    "Videos",
+)
 
 
-def log(message):
-    print(message, flush=True)
+if not SUPABASE_URL:
+    raise RuntimeError(
+        "SUPABASE_URL is required"
+    )
 
+if not SUPABASE_KEY:
+    raise RuntimeError(
+        "SUPABASE_KEY is required"
+    )
+
+
+# ------------------------------------------------------------
+# Search engine
+# ------------------------------------------------------------
+
+storage = SupabaseIndexStorage(
+    project_url=SUPABASE_URL,
+    api_key=SUPABASE_KEY,
+    bucket=SUPABASE_BUCKET,
+)
+
+storage_repository = IndexStorageRepository(
+    storage
+)
+
+indexing_pipeline = CrawlIndexPipeline(
+    root=INDEX_ROOT,
+    storage=storage,
+    storage_repository=storage_repository,
+)
+
+search_index = indexing_pipeline.search_index
+document_store = indexing_pipeline.document_store
+
+search_service = SearchService(
+    search_index,
+    document_store,
+    indexing_pipeline=indexing_pipeline,
+)
+
+
+# ------------------------------------------------------------
+# HTTP handler
+# ------------------------------------------------------------
 
 class WebsiteHandler(SimpleHTTPRequestHandler):
+
     protocol_version = "HTTP/1.0"
 
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-
-        if parsed.path == "/search":
-            self.handle_search()
-            return
-
-        try:
-            super().do_GET()
-
-        except (BrokenPipeError, ConnectionResetError):
-            pass
-
-    def handle_search(self):
-        parsed = urllib.parse.urlparse(self.path)
-        params = urllib.parse.parse_qs(parsed.query)
-
-        query = params.get("q", [""])[0].strip()
-
-        if not query:
-            self.send_redirect_home()
-            return
-
-        log(
-            f"[SEARCH] Starting search: "
-            f"query={query!r}"
+    def __init__(
+        self,
+        *args,
+        **kwargs
+    ):
+        super().__init__(
+            *args,
+            directory=WEBSITE_DIRECTORY,
+            **kwargs
         )
 
-        try:
-            data = self.request_search_api(query)
-
-            results = data.get("results", [])
-
-            if not isinstance(results, list):
-                log(
-                    "[SEARCH] API returned an invalid "
-                    "'results' value"
-                )
-
-                results = []
-
-            log(
-                f"[SEARCH] API returned "
-                f"{len(results)} results"
-            )
-
-            page = self.render_results(
-                query,
-                results
-            )
-
-            self.send_html_response(
-                200,
-                page
-            )
-
-        except urllib.error.HTTPError as error:
-            log(
-                f"[SEARCH] Final upstream HTTP error: "
-                f"status={error.code}, "
-                f"reason={error.reason}"
-            )
-
-            self.log_http_error(error)
-
-            if error.code == 429:
-                self.send_search_error(
-                    "Search service is temporarily "
-                    "waking up. Please try again in "
-                    "a moment.",
-                    status_code=503
-                )
-
-            elif error.code in (
-                502,
-                503,
-                504
-            ):
-                self.send_search_error(
-                    "Search service is temporarily "
-                    "unavailable. Please try again "
-                    "in a moment.",
-                    status_code=503
-                )
-
-            else:
-                self.send_search_error(
-                    f"Search service returned "
-                    f"HTTP {error.code}: {error.reason}",
-                    status_code=502
-                )
-
-        except urllib.error.URLError as error:
-            log(
-                "[SEARCH] Upstream connection error: "
-                f"type={type(error).__name__}, "
-                f"reason={error.reason}"
-            )
-
-            log(
-                "[SEARCH] Upstream connection traceback:"
-            )
-
-            traceback.print_exc()
-
-            self.send_search_error(
-                "The search service is waking up. "
-                "Please try again in a moment.",
-                status_code=503
-            )
-
-        except TimeoutError as error:
-            log(
-                "[SEARCH] Search request timed out: "
-                f"{error}"
-            )
-
-            log("[SEARCH] Timeout traceback:")
-
-            traceback.print_exc()
-
-            self.send_search_error(
-                "The search service took too long "
-                "to respond.",
-                status_code=504
-            )
-
-        except json.JSONDecodeError as error:
-            log(
-                "[SEARCH] Invalid JSON received from API: "
-                f"{error}"
-            )
-
-            log("[SEARCH] JSON traceback:")
-
-            traceback.print_exc()
-
-            self.send_search_error(
-                "The search service returned invalid data.",
-                status_code=502
-            )
-
-        except Exception as error:
-            log(
-                "[SEARCH] Unexpected search error: "
-                f"type={type(error).__name__}, "
-                f"message={error}"
-            )
-
-            log(
-                "[SEARCH] Unexpected error traceback:"
-            )
-
-            traceback.print_exc()
-
-            self.send_search_error(
-                "An unexpected search error occurred.",
-                status_code=500
-            )
-
-    def request_search_api(self, query):
-        deadline = time.monotonic() + WAKE_TIMEOUT
-
-        log(
-            "[SEARCH] Beginning API readiness "
-            f"window of {WAKE_TIMEOUT} seconds"
-        )
-
-        # -------------------------------------------------
-        # PHASE 1
-        # Wake/check the API using the lightweight
-        # health endpoint.
-        # -------------------------------------------------
-
-        while True:
-            remaining = deadline - time.monotonic()
-
-            if remaining <= 0:
-                log(
-                    "[SEARCH] API readiness window "
-                    "expired"
-                )
-
-                raise urllib.error.URLError(
-                    "API did not become ready "
-                    "within the wake window"
-                )
-
-            log(
-                "[SEARCH] Checking API readiness: "
-                f"{SEARCH_API_HEALTH}"
-            )
-
-            health_request = urllib.request.Request(
-                SEARCH_API_HEALTH,
-                headers={
-                    "Accept": "application/json",
-                    "User-Agent": "OurSearchWebsite/1.0",
-                    "Connection": "close",
-                },
-                method="GET",
-            )
-
-            try:
-                timeout = min(
-                    API_TIMEOUT,
-                    max(1, int(remaining))
-                )
-
-                with urllib.request.urlopen(
-                    health_request,
-                    timeout=timeout
-                ) as response:
-
-                    health_body = response.read()
-
-                    log(
-                        "[SEARCH] Health response: "
-                        f"status={response.status}, "
-                        f"reason={response.reason}"
-                    )
-
-                    log(
-                        "[SEARCH] Health response "
-                        f"bytes: {len(health_body)}"
-                    )
-
-                    if response.status in (
-                        200,
-                        204
-                    ):
-                        log(
-                            "[SEARCH] API is reachable "
-                            "and ready"
-                        )
-
-                        break
-
-            except urllib.error.HTTPError as error:
-                log(
-                    "[SEARCH] Health check HTTP error: "
-                    f"status={error.code}, "
-                    f"reason={error.reason}"
-                )
-
-                self.log_http_error(error)
-
-            except (
-                urllib.error.URLError,
-                TimeoutError
-            ) as error:
-                log(
-                    "[SEARCH] Health check connection "
-                    f"error: {error}"
-                )
-
-            remaining = deadline - time.monotonic()
-
-            if remaining <= 0:
-                log(
-                    "[SEARCH] No time remaining for "
-                    "another health check"
-                )
-
-                raise urllib.error.URLError(
-                    "API did not become ready"
-                )
-
-            delay = min(
-                WAKE_RETRY_DELAY,
-                remaining
-            )
-
-            log(
-                "[SEARCH] API not ready yet. "
-                f"Waiting {delay:.1f} seconds"
-            )
-
-            time.sleep(delay)
-
-        # -------------------------------------------------
-        # PHASE 2
-        # API is awake/reachable.
-        # Now perform the actual search.
-        # -------------------------------------------------
-
-        request_data = json.dumps({
-            "query": query,
-            "mode": "OR",
-            "top_k": 10
-        }).encode("utf-8")
-
-        search_attempt = 0
-
-        while True:
-            remaining = deadline - time.monotonic()
-
-            if remaining <= 0:
-                log(
-                    "[SEARCH] Search readiness window "
-                    "expired before successful search"
-                )
-
-                raise urllib.error.URLError(
-                    "Search API did not become "
-                    "available within the wake window"
-                )
-
-            search_attempt += 1
-
-            log(
-                "[SEARCH] Search API attempt "
-                f"{search_attempt}: {SEARCH_API}"
-            )
-
-            request = urllib.request.Request(
-                SEARCH_API,
-                data=request_data,
-                headers={
-                    "Content-Type": "application/json",
-                    "Accept": "application/json",
-                    "User-Agent": "OurSearchWebsite/1.0",
-                    "Connection": "close",
-                },
-                method="POST",
-            )
-
-            try:
-                timeout = min(
-                    API_TIMEOUT,
-                    max(1, int(remaining))
-                )
-
-                with urllib.request.urlopen(
-                    request,
-                    timeout=timeout
-                ) as response:
-
-                    response_body = response.read()
-
-                    log(
-                        "[SEARCH] API response: "
-                        f"status={response.status}, "
-                        f"reason={response.reason}"
-                    )
-
-                    log(
-                        "[SEARCH] API response headers: "
-                        f"{dict(response.headers)}"
-                    )
-
-                    log(
-                        "[SEARCH] API response body bytes: "
-                        f"{len(response_body)}"
-                    )
-
-                    if response.status != 200:
-                        raise RuntimeError(
-                            f"Unexpected API status "
-                            f"{response.status}"
-                        )
-
-                    return json.loads(
-                        response_body.decode("utf-8")
-                    )
-
-            except urllib.error.HTTPError as error:
-
-                # These are treated as transient because
-                # they can occur while Render is waking
-                # or routing the Free service.
-
-                transient_statuses = (
-                    429,
-                    502,
-                    503,
-                    504,
-                )
-
-                if error.code not in transient_statuses:
-                    raise
-
-                log(
-                    "[SEARCH] Transient API HTTP error: "
-                    f"status={error.code}, "
-                    f"attempt={search_attempt}"
-                )
-
-                self.log_http_error(error)
-
-                remaining = (
-                    deadline - time.monotonic()
-                )
-
-                if remaining <= 0:
-                    log(
-                        "[SEARCH] No time remaining "
-                        "for another search attempt"
-                    )
-
-                    raise
-
-                delay = min(
-                    SEARCH_RETRY_DELAY,
-                    remaining
-                )
-
-                log(
-                    "[SEARCH] API is still becoming "
-                    "available. Waiting "
-                    f"{delay:.1f} seconds before retry"
-                )
-
-                time.sleep(delay)
-
-            except (
-                urllib.error.URLError,
-                TimeoutError
-            ) as error:
-
-                log(
-                    "[SEARCH] Transient search "
-                    f"connection error: {error}"
-                )
-
-                remaining = (
-                    deadline - time.monotonic()
-                )
-
-                if remaining <= 0:
-                    raise
-
-                delay = min(
-                    SEARCH_RETRY_DELAY,
-                    remaining
-                )
-
-                log(
-                    "[SEARCH] Waiting "
-                    f"{delay:.1f} seconds before "
-                    "another search attempt"
-                )
-
-                time.sleep(delay)
-
-        raise RuntimeError(
-            "Search API request failed"
-        )
-
-    def log_http_error(self, error):
-        try:
-            log(
-                "[SEARCH] Upstream HTTP error headers: "
-                f"{dict(error.headers)}"
-            )
-
-        except Exception:
-            log(
-                "[SEARCH] Could not read "
-                "upstream error headers"
-            )
-
-        try:
-            error_body = error.read().decode(
-                "utf-8",
-                errors="replace"
-            )
-
-            log(
-                "[SEARCH] Upstream HTTP error body: "
-                f"{error_body[:2000]}"
-            )
-
-        except Exception as body_error:
-            log(
-                "[SEARCH] Could not read "
-                f"upstream error body: {body_error}"
-            )
-
-    def send_redirect_home(self):
-        try:
-            self.send_response(302)
-
-            self.send_header(
-                "Location",
-                "/"
-            )
-
-            self.send_header(
-                "Connection",
-                "close"
-            )
-
-            self.end_headers()
-
-        except (
-            BrokenPipeError,
-            ConnectionResetError
-        ):
-            pass
-
-        finally:
-            self.close_connection = True
-
-    def send_html_response(
+    # --------------------------------------------------------
+    # JSON response
+    # --------------------------------------------------------
+
+    def send_json(
         self,
         status_code,
-        page
+        payload
     ):
-        body = page.encode("utf-8")
+        body = json.dumps(
+            payload,
+            ensure_ascii=False,
+        ).encode("utf-8")
 
         try:
-            self.send_response(status_code)
+            self.send_response(
+                status_code
+            )
 
             self.send_header(
                 "Content-Type",
-                "text/html; charset=utf-8"
+                "application/json; charset=utf-8",
             )
 
             self.send_header(
                 "Content-Length",
-                str(len(body))
+                str(len(body)),
             )
 
             self.send_header(
                 "Cache-Control",
-                "no-store"
+                "no-store",
+            )
+
+            self.send_header(
+                "Access-Control-Allow-Origin",
+                "*",
+            )
+
+            self.send_header(
+                "Access-Control-Allow-Methods",
+                "GET, POST, OPTIONS",
+            )
+
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type",
             )
 
             self.send_header(
                 "Connection",
-                "close"
+                "close",
             )
 
             self.end_headers()
 
             self.wfile.write(body)
+            self.wfile.flush()
 
         except (
             BrokenPipeError,
-            ConnectionResetError
+            ConnectionResetError,
+            ConnectionAbortedError,
         ):
-            pass
+            return
 
-        finally:
-            self.close_connection = True
+    # --------------------------------------------------------
+    # HTML response
+    # --------------------------------------------------------
 
-    def send_search_error(
+    def send_html(
         self,
-        message,
-        status_code=500
+        status_code,
+        body
     ):
-        safe_message = html.escape(
-            str(message)
+        encoded = body.encode(
+            "utf-8"
         )
 
-        body = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
+        try:
+            self.send_response(
+                status_code
+            )
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+            self.send_header(
+                "Content-Type",
+                "text/html; charset=utf-8",
+            )
 
-    <title>Search Error — Our Search</title>
+            self.send_header(
+                "Content-Length",
+                str(len(encoded)),
+            )
 
-    <link
-        rel="stylesheet"
-        href="/style.css"
-    >
-</head>
+            self.send_header(
+                "Cache-Control",
+                "no-store",
+            )
 
-<body class="search-page">
+            self.send_header(
+                "Connection",
+                "close",
+            )
 
-    <header class="search-header">
+            self.end_headers()
 
-        <a
-            href="/"
-            class="search-logo"
-            aria-label="Our Search home"
-        >
-            Our Search
-        </a>
+            self.wfile.write(encoded)
+            self.wfile.flush()
 
-        <form
-            class="search-page-form"
-            method="GET"
-            action="/search"
-        >
+        except (
+            BrokenPipeError,
+            ConnectionResetError,
+            ConnectionAbortedError,
+        ):
+            return
 
-            <span
-                class="search-page-icon"
-                aria-hidden="true"
-            >⌕</span>
+    # --------------------------------------------------------
+    # OPTIONS
+    # --------------------------------------------------------
 
-            <input
-                id="search-input"
-                type="search"
-                name="q"
-                placeholder="Search anything..."
-                autocomplete="off"
-                value=""
-            >
+    def do_OPTIONS(self):
 
-            <button
-                type="submit"
-                aria-label="Search"
-            >→</button>
+        try:
+            self.send_response(
+                204
+            )
 
-        </form>
+            self.send_header(
+                "Access-Control-Allow-Origin",
+                "*",
+            )
 
-    </header>
+            self.send_header(
+                "Access-Control-Allow-Methods",
+                "GET, POST, OPTIONS",
+            )
 
-    <main class="search-main">
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type",
+            )
 
-        <div class="search-intro">
+            self.send_header(
+                "Connection",
+                "close",
+            )
 
-            <h1>Search error</h1>
+            self.end_headers()
 
-            <p>
-                {safe_message}
-            </p>
+        except (
+            BrokenPipeError,
+            ConnectionResetError,
+            ConnectionAbortedError,
+        ):
+            return
 
-        </div>
+    # --------------------------------------------------------
+    # GET
+    # --------------------------------------------------------
 
-    </main>
+    def do_GET(self):
 
-</body>
-</html>
-"""
+        try:
 
-        self.send_html_response(
-            status_code,
-            body
+            parsed = urlparse(
+                self.path
+            )
+
+            path = parsed.path
+
+            # ----------------------------------------------
+            # Health
+            # ----------------------------------------------
+
+            if path == "/health":
+
+                self.send_json(
+                    200,
+                    search_service.health(),
+                )
+
+                return
+
+            # ----------------------------------------------
+            # Website search
+            # ----------------------------------------------
+
+            if path == "/search":
+
+                self.handle_search(
+                    parsed.query
+                )
+
+                return
+
+            # ----------------------------------------------
+            # Everything else = static website
+            # ----------------------------------------------
+
+            super().do_GET()
+
+        except (
+            BrokenPipeError,
+            ConnectionResetError,
+            ConnectionAbortedError,
+        ):
+            return
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.send_html(
+                500,
+                self.render_error_page(
+                    "Internal server error",
+                    str(error),
+                ),
+            )
+
+    # --------------------------------------------------------
+    # POST
+    # --------------------------------------------------------
+
+    def do_POST(self):
+
+        parsed = urlparse(
+            self.path
         )
+
+        path = parsed.path
+
+        allowed_paths = (
+            "/search",
+            "/index",
+            "/delete",
+            "/flush",
+        )
+
+        if path not in allowed_paths:
+
+            self.send_json(
+                404,
+                {
+                    "error": "not_found"
+                },
+            )
+
+            return
+
+        try:
+
+            # ----------------------------------------------
+            # Flush does not require a request body
+            # ----------------------------------------------
+
+            if path == "/flush":
+
+                result = (
+                    search_service.flush_index()
+                )
+
+                self.send_json(
+                    200,
+                    result,
+                )
+
+                return
+
+            # ----------------------------------------------
+            # Read request body
+            # ----------------------------------------------
+
+            content_length = int(
+                self.headers.get(
+                    "Content-Length",
+                    "0",
+                )
+            )
+
+            if content_length <= 0:
+
+                raise ValueError(
+                    "request body is empty"
+                )
+
+            if content_length > 1_000_000:
+
+                raise ValueError(
+                    "request body is too large"
+                )
+
+            body = self.rfile.read(
+                content_length
+            )
+
+            payload = json.loads(
+                body.decode(
+                    "utf-8"
+                )
+            )
+
+            # ----------------------------------------------
+            # Search
+            # ----------------------------------------------
+
+            if path == "/search":
+
+                result = (
+                    search_service.handle_request(
+                        payload
+                    )
+                )
+
+            # ----------------------------------------------
+            # Index
+            # ----------------------------------------------
+
+            elif path == "/index":
+
+                result = (
+                    search_service.index_document(
+                        payload
+                    )
+                )
+
+            # ----------------------------------------------
+            # Delete
+            # ----------------------------------------------
+
+            elif path == "/delete":
+
+                result = (
+                    search_service.delete_document(
+                        payload
+                    )
+                )
+
+            else:
+
+                raise ValueError(
+                    "unsupported request"
+                )
+
+            self.send_json(
+                200,
+                result,
+            )
+
+        except json.JSONDecodeError:
+
+            self.send_json(
+                400,
+                {
+                    "error": "invalid_json"
+                },
+            )
+
+        except ValueError as error:
+
+            self.send_json(
+                400,
+                {
+                    "error": str(error)
+                },
+            )
+
+        except (
+            BrokenPipeError,
+            ConnectionResetError,
+            ConnectionAbortedError,
+        ):
+            return
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.send_json(
+                500,
+                {
+                    "error": "internal_server_error",
+                    "message": str(error),
+                },
+            )
+
+    # --------------------------------------------------------
+    # Website search
+    # --------------------------------------------------------
+
+    def handle_search(
+        self,
+        query_string
+    ):
+
+        params = parse_qs(
+            query_string
+        )
+
+        query_values = params.get(
+            "q",
+            [],
+        )
+
+        query = (
+            query_values[0]
+            if query_values
+            else ""
+        )
+
+        query = query.strip()
+
+        # ----------------------------------------------
+        # Empty query
+        # ----------------------------------------------
+
+        if not query:
+
+            self.send_redirect_home()
+
+            return
+
+        print(
+            f"[SEARCH] Query: {query}",
+            flush=True,
+        )
+
+        try:
+
+            result = search_service.search(
+                query=query,
+                mode="OR",
+                top_k=10,
+            )
+
+            self.send_html(
+                200,
+                self.render_results(
+                    query,
+                    result,
+                ),
+            )
+
+        except Exception as error:
+
+            traceback.print_exc()
+
+            self.send_html(
+                500,
+                self.render_error_page(
+                    "Search error",
+                    str(error),
+                ),
+            )
+
+    # --------------------------------------------------------
+    # Redirect
+    # --------------------------------------------------------
+
+    def send_redirect_home(self):
+
+        try:
+
+            self.send_response(
+                302
+            )
+
+            self.send_header(
+                "Location",
+                "/",
+            )
+
+            self.send_header(
+                "Cache-Control",
+                "no-store",
+            )
+
+            self.send_header(
+                "Connection",
+                "close",
+            )
+
+            self.end_headers()
+
+        except (
+            BrokenPipeError,
+            ConnectionResetError,
+            ConnectionAbortedError,
+        ):
+            return
+
+    # --------------------------------------------------------
+    # Search result page
+    # --------------------------------------------------------
 
     def render_results(
         self,
         query,
-        results
+        response,
     ):
+
         safe_query = html.escape(
             query
+        )
+
+        results = response.get(
+            "results",
+            []
         )
 
         result_cards = []
@@ -690,26 +628,40 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             ):
                 continue
 
-            title = str(
-                result.get("title")
-                or result.get("name")
-                or "Untitled result"
+            title = result.get(
+                "title",
+                ""
             )
 
-            url = str(
-                result.get("url")
-                or result.get("link")
-                or ""
+            url = result.get(
+                "url",
+                ""
             )
 
-            description = str(
-                result.get("description")
-                or result.get("snippet")
-                or ""
+            description = result.get(
+                "description",
+                ""
             )
 
-            if not url:
-                continue
+            if not isinstance(
+                title,
+                str
+            ):
+                title = str(title)
+
+            if not isinstance(
+                url,
+                str
+            ):
+                url = str(url)
+
+            if not isinstance(
+                description,
+                str
+            ):
+                description = str(
+                    description
+                )
 
             safe_title = html.escape(
                 title
@@ -717,78 +669,82 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             safe_url = html.escape(
                 url,
-                quote=True
+                quote=True,
             )
 
-            safe_description = html.escape(
-                description
+            safe_description = (
+                html.escape(
+                    description
+                )
             )
+
+            if not safe_title:
+
+                safe_title = safe_url
+
+            if not safe_url:
+                continue
 
             result_cards.append(
                 f"""
                 <article class="search-result">
-
                     <a
-                        class="search-result-title"
+                        class="search-result-link"
                         href="{safe_url}"
                         target="_blank"
                         rel="noopener noreferrer"
                     >
-                        {safe_title}
+                        <h2 class="search-result-title">
+                            {safe_title}
+                        </h2>
+
+                        <div class="search-result-url">
+                            {safe_url}
+                        </div>
+
+                        <p class="search-result-description">
+                            {safe_description}
+                        </p>
                     </a>
-
-                    <div class="search-result-url">
-                        {safe_url}
-                    </div>
-
-                    <p class="search-result-description">
-                        {safe_description}
-                    </p>
-
                 </article>
                 """
             )
 
         if result_cards:
+
             results_html = "\n".join(
                 result_cards
             )
 
         else:
+
             results_html = """
-                <div class="search-no-results">
-
+                <div class="no-results">
                     <h2>No results found</h2>
-
                     <p>
                         Our Search could not find
                         matching results.
                     </p>
-
                 </div>
             """
 
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
-
     <meta charset="UTF-8">
-
     <meta
         name="viewport"
-        content="width=device-width,
-                 initial-scale=1.0"
+        content="width=device-width, initial-scale=1.0"
     >
 
     <title>
-        {safe_query} — Our Search
+        Search results — Our Search
     </title>
 
     <link
         rel="stylesheet"
         href="/style.css"
     >
-
 </head>
 
 <body class="search-page">
@@ -796,12 +752,15 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
     <header class="search-header">
 
         <a
-            href="/"
             class="search-logo"
-            aria-label="Our Search home"
+            href="/"
         >
-            Our Search
+            OUR SEARCH
         </a>
+
+    </header>
+
+    <main class="search-results-page">
 
         <form
             class="search-page-form"
@@ -809,48 +768,33 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             action="/search"
         >
 
-            <span
-                class="search-page-icon"
-                aria-hidden="true"
-            >⌕</span>
-
             <input
                 id="search-input"
-                type="search"
                 name="q"
+                type="search"
+                value="{safe_query}"
                 placeholder="Search anything..."
                 autocomplete="off"
-                value="{safe_query}"
                 enterkeyhint="search"
             >
 
             <button
                 type="submit"
                 aria-label="Search"
-            >→</button>
+            >
+                →
+            </button>
 
         </form>
 
-    </header>
-
-    <main class="search-main">
-
-        <div class="search-results-header">
-
-            <h1>
-                Search results
-            </h1>
-
-            <p>
-                Results for
-                <strong>
-                    {safe_query}
-                </strong>
-            </p>
-
-        </div>
-
         <section class="search-results">
+
+            <div class="search-results-heading">
+                <p>
+                    Results for
+                    <strong>{safe_query}</strong>
+                </p>
+            </div>
 
             {results_html}
 
@@ -862,76 +806,199 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 </html>
 """
 
+    # --------------------------------------------------------
+    # Error page
+    # --------------------------------------------------------
 
-if __name__ == "__main__":
+    def render_error_page(
+        self,
+        title,
+        message,
+    ):
 
-    website_directory = os.path.join(
-        os.path.dirname(
-            os.path.abspath(__file__)
-        ),
-        "website"
-    )
+        safe_title = html.escape(
+            title
+        )
+
+        safe_message = html.escape(
+            message
+        )
+
+        return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        {safe_title} — Our Search
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/style.css"
+    >
+</head>
+
+<body class="search-page">
+
+    <header class="search-header">
+
+        <a
+            class="search-logo"
+            href="/"
+        >
+            OUR SEARCH
+        </a>
+
+    </header>
+
+    <main class="search-results-page">
+
+        <section class="no-results">
+
+            <h1>
+                {safe_title}
+            </h1>
+
+            <p>
+                {safe_message}
+            </p>
+
+            <p>
+                <a href="/">
+                    Return to Our Search
+                </a>
+            </p>
+
+        </section>
+
+    </main>
+
+</body>
+</html>
+"""
+
+    # --------------------------------------------------------
+    # Logging
+    # --------------------------------------------------------
+
+    def log_message(
+        self,
+        format_string,
+        *args
+    ):
+
+        print(
+            "[HTTP] "
+            + format_string % args,
+            flush=True,
+        )
+
+
+# ------------------------------------------------------------
+# Server
+# ------------------------------------------------------------
+
+class WebsiteSearchServer(
+    ThreadingHTTPServer
+):
+
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+# ------------------------------------------------------------
+# Main
+# ------------------------------------------------------------
+
+server = None
+
+try:
 
     if not os.path.isdir(
-        website_directory
+        WEBSITE_DIRECTORY
     ):
+
         raise RuntimeError(
             "Website directory not found: "
-            f"{website_directory}"
+            + WEBSITE_DIRECTORY
         )
 
-    os.chdir(
-        website_directory
-    )
+    HOST = "0.0.0.0"
 
-    port = int(
+    PORT = int(
         os.environ.get(
             "PORT",
-            "3000"
+            "3000",
         )
     )
 
-    server = ThreadingHTTPServer(
-        ("0.0.0.0", port),
-        WebsiteHandler
+    server = WebsiteSearchServer(
+        (
+            HOST,
+            PORT,
+        ),
+        WebsiteHandler,
     )
 
-    log(
-        "[SERVER] Our Search website server "
-        f"starting on port {port}"
+    print(
+        "OUR SEARCH WEBSITE + SEARCH ENGINE",
+        flush=True,
     )
 
-    log(
-        "[SERVER] Website directory: "
-        f"{website_directory}"
+    print(
+        f"Running on {HOST}:{PORT}",
+        flush=True,
     )
 
-    log(
-        "[SERVER] Search API: "
-        f"{SEARCH_API}"
+    print(
+        f"Website: {WEBSITE_DIRECTORY}",
+        flush=True,
     )
 
-    log(
-        "[SERVER] Search API health: "
-        f"{SEARCH_API_HEALTH}"
+    print(
+        f"Index root: {INDEX_ROOT}",
+        flush=True,
     )
 
-    log(
-        "[SERVER] API wake timeout: "
-        f"{WAKE_TIMEOUT} seconds"
+    print(
+        "Storage: Supabase",
+        flush=True,
     )
 
-    try:
-        server.serve_forever()
+    print(
+        f"Bucket: {SUPABASE_BUCKET}",
+        flush=True,
+    )
 
-    except KeyboardInterrupt:
-        log(
-            "[SERVER] Shutdown requested"
-        )
+    print(
+        "Search engine: LOCAL PROCESS",
+        flush=True,
+    )
 
-    finally:
+    print(
+        "External Search API dependency: NONE",
+        flush=True,
+    )
+
+    server.serve_forever()
+
+except KeyboardInterrupt:
+
+    print(
+        "\nStopping server...",
+        flush=True,
+    )
+
+finally:
+
+    if server is not None:
+
         server.server_close()
 
-        log(
-            "[SERVER] Server stopped"
-        )
+    indexing_pipeline.close()
