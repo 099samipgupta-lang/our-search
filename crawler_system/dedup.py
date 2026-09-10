@@ -41,6 +41,17 @@ class URLDeduplicator:
 
         if self.state_store is not None:
 
+            existing = self.state_store.get(
+                normalized
+            )
+
+            if existing is not None:
+                self.seen.add(
+                    normalized
+                )
+
+                return False
+
             parsed = urlparse(
                 normalized
             )
@@ -53,11 +64,18 @@ class URLDeduplicator:
                 )
             )
 
-            self.state_store.add_discovered(
+            inserted = self.state_store.add_discovered(
                 url=normalized,
                 document_id=document_id,
                 host=host
             )
+
+            if not inserted:
+                self.seen.add(
+                    normalized
+                )
+
+                return False
 
         self.seen.add(
             normalized
