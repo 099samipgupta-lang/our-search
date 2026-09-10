@@ -1,28 +1,50 @@
 from urllib.parse import urlparse
 import heapq
 import time
+import os
 
 from crawler_system.frontier_storage import FrontierStorage
+from crawler_system.document_identity import DocumentIdentity
 
 
 class CrawlFrontier:
+    """
+    Crawl frontier.
+
+    When a URLStateStore is supplied, SQLite becomes the source of truth
+    for URL state, priority, leases, retry timing, and host scheduling.
+
+    The legacy JSON/in-memory frontier remains available when no state_store
+    is supplied, preserving backwards compatibility.
+    """
 
     def __init__(
         self,
         default_delay=2,
         max_retries=3,
-        storage_path="crawler_storage/frontier/state.json"
+        storage_path="crawler_storage/frontier/state.json",
+        state_store=None,
     ):
         self.domains = {}
         self.url_entries = {}
         self.leased_entries = {}
-
         self.heap = []
         self.sequence = 0
 
         self.default_delay = float(default_delay)
         self.max_retries = int(max_retries)
 
+        self.state_store = state_store
+
+        # SQLite-backed mode
+        if self.state_store is not None:
+            self.storage = None
+            self.owner = (
+                f"frontier-{os.getpid()}-{id(self)}"
+            )
+            return
+
+        # Legacy JSON-backed mode
         self.storage = FrontierStorage(storage_path)
 
         state = self.storage.load()
@@ -30,148 +52,204 @@ class CrawlFrontier:
         if state:
             self.load_state(state)
 
+    # ------------------------------------------------------------------
+    # Common helpers
+    # ------------------------------------------------------------------
+
     def _domain(self, url):
         parsed = urlparse(url)
         return parsed.netloc.lower()
 
-    def _ensure_domain(self, domain):
+    # ------------------------------------------------------------------
+    # SQLite-backed frontier
+    # ------------------------------------------------------------------
 
-        if domain not in self.domains:
-            self.domains[domain] = {
-                "last_crawl_time": 0,
-                "next_allowed_time": 0,
-                "crawl_delay": self.default_delay,
-                "failures": {}
-            }
+    def _sqlite_add(self, url, priority=50, available_at=None):
+        normalized_url = url
 
-        else:
-            self.domains[domain].setdefault(
-                "next_allowed_time",
-                0
+        if available_at is None:
+            available_at = time.time()
+
+        existing = self.state_store.get(normalized_url)
+
+        if existing is None:
+            host = self._domain(normalized_url)
+
+            document_id = DocumentIdentity.from_normalized_url(
+                normalized_url
             )
 
-    def _save(self):
-        self.storage.save(
-            self.get_state()
+            inserted = self.state_store.add_discovered(
+                normalized_url,
+                document_id,
+                host,
+                priority=priority,
+            )
+
+            if not inserted:
+                return False
+
+        existing = self.state_store.get(normalized_url)
+
+        if existing is None:
+            return False
+
+        # Do not put already-active URLs into the queue again.
+        if existing["state"] in ("queued", "leased"):
+            return False
+
+        # A crawled URL is not re-added automatically.
+        # Recrawling will be handled by the scheduler later.
+        if existing["state"] == "crawled":
+            return False
+
+        return self.state_store.mark_queued(
+            normalized_url,
+            priority=priority,
+            next_crawl_at=available_at,
         )
 
-    def add(
-        self,
-        url,
-        priority=50,
-        available_at=None
-    ):
-        if (
-            url in self.url_entries
-            or url in self.leased_entries
-        ):
-            return False
+    def _sqlite_get_next(self):
+        result = self.state_store.claim_next(
+            owner=self.owner,
+            now=time.time(),
+        )
+
+        if result is None:
+            return None
+
+        self.leased_entries[result["url"]] = result
+
+        return result["url"]
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
+    def add(self, url, priority=50, available_at=None):
+        """
+        Add a URL to the frontier.
+
+        Returns True when the URL becomes queued.
+        """
+
+        if self.state_store is not None:
+            return self._sqlite_add(
+                url,
+                priority=priority,
+                available_at=available_at,
+            )
+
+        # --------------------------------------------------------------
+        # Legacy implementation
+        # --------------------------------------------------------------
 
         domain = self._domain(url)
 
         if not domain:
             return False
 
-        self._ensure_domain(domain)
+        if url in self.url_entries:
+            existing = self.url_entries[url]
+
+            if existing["state"] in ("queued", "leased"):
+                return False
 
         if available_at is None:
             available_at = time.time()
 
         entry = {
             "url": url,
+            "domain": domain,
             "priority": float(priority),
+            "state": "queued",
+            "attempts": 0,
             "available_at": float(available_at),
-            "sequence": self.sequence
+            "added_at": time.time(),
+            "last_crawled_at": 0,
+            "last_error": None,
         }
 
-        self.sequence += 1
-
         self.url_entries[url] = entry
+
+        self.sequence += 1
 
         heapq.heappush(
             self.heap,
             (
                 -float(priority),
                 float(available_at),
-                entry["sequence"],
-                url
-            )
+                self.sequence,
+                url,
+            ),
         )
+
+        if domain not in self.domains:
+            self.domains[domain] = {
+                "crawl_delay": self.default_delay,
+                "last_crawl_time": 0,
+                "next_allowed_time": 0,
+                "failures": 0,
+            }
 
         self._save()
 
         return True
 
     def size(self):
-        return (
-            len(self.url_entries)
-            + len(self.leased_entries)
+        if self.state_store is not None:
+            counts = self.state_store.counts()
+
+            return (
+                counts.get("queued", 0)
+                + counts.get("retry", 0)
+                + counts.get("leased", 0)
+            )
+
+        return sum(
+            1
+            for entry in self.url_entries.values()
+            if entry["state"] in ("queued", "retry")
         )
 
     def queued_size(self):
-        return len(self.url_entries)
+        if self.state_store is not None:
+            counts = self.state_store.counts()
+
+            return (
+                counts.get("queued", 0)
+                + counts.get("retry", 0)
+            )
+
+        return sum(
+            1
+            for entry in self.url_entries.values()
+            if entry["state"] in ("queued", "retry")
+        )
 
     def leased_size(self):
+        if self.state_store is not None:
+            return self.state_store.counts().get(
+                "leased",
+                0,
+            )
+
         return len(self.leased_entries)
 
-    def _domain_ready(self, domain):
-
-        self._ensure_domain(domain)
-
-        data = self.domains[domain]
-
-        now = time.time()
-
-        last_crawl_ready = (
-            data["last_crawl_time"]
-            + data["crawl_delay"]
-        )
-
-        reserved_ready = data.get(
-            "next_allowed_time",
-            0
-        )
-
-        return now >= max(
-            last_crawl_ready,
-            reserved_ready
-        )
-
-    def _reserve_domain(self, domain):
-
-        self._ensure_domain(domain)
-
-        data = self.domains[domain]
-
-        now = time.time()
-
-        current_ready = data.get(
-            "next_allowed_time",
-            0
-        )
-
-        data["next_allowed_time"] = max(
-            current_ready,
-            now
-        ) + data["crawl_delay"]
-
     def get_next(self):
+        if self.state_store is not None:
+            return self._sqlite_get_next()
 
-        if not self.heap:
-            return None
+        # --------------------------------------------------------------
+        # Legacy implementation
+        # --------------------------------------------------------------
+
+        now = time.time()
 
         skipped = []
 
-        selected = None
-
         while self.heap:
-
-            (
-                negative_priority,
-                available_at,
-                sequence,
-                url
-            ) = heapq.heappop(
+            priority, available_at, sequence, url = heapq.heappop(
                 self.heap
             )
 
@@ -180,115 +258,112 @@ class CrawlFrontier:
             if entry is None:
                 continue
 
-            if entry["sequence"] != sequence:
+            if entry["state"] not in ("queued", "retry"):
                 continue
 
-            now = time.time()
-
-            if now < available_at:
-
+            if available_at > now:
                 skipped.append(
                     (
-                        negative_priority,
+                        priority,
                         available_at,
                         sequence,
-                        url
+                        url,
                     )
                 )
-
                 continue
 
-            domain = self._domain(url)
+            domain = entry["domain"]
 
-            if not self._domain_ready(domain):
-
+            if not self._domain_ready(domain, now):
                 skipped.append(
                     (
-                        negative_priority,
+                        priority,
                         available_at,
                         sequence,
-                        url
+                        url,
                     )
                 )
-
                 continue
 
-            selected = url
+            entry["state"] = "leased"
+            self.leased_entries[url] = entry
 
-            del self.url_entries[url]
+            self._reserve_domain(domain, now)
 
-            self.leased_entries[url] = {
-                **entry,
-                "leased_at": time.time()
-            }
+            for item in skipped:
+                heapq.heappush(self.heap, item)
 
-            self._reserve_domain(domain)
+            self._save()
 
-            break
+            return url
 
         for item in skipped:
-            heapq.heappush(
-                self.heap,
-                item
-            )
+            heapq.heappush(self.heap, item)
 
-        if selected is not None:
-            self._save()
-
-        return selected
+        return None
 
     def complete(self, url):
+        if self.state_store is not None:
+            result = self.state_store.mark_crawled(url)
 
-        if url in self.leased_entries:
-            del self.leased_entries[url]
+            self.leased_entries.pop(url, None)
 
-            self.mark_crawled(url)
+            return result
 
-            self._save()
-
-            return True
-
-        return False
-
-    def release(
-        self,
-        url,
-        priority=None,
-        available_at=None
-    ):
-        entry = self.leased_entries.pop(
-            url,
-            None
-        )
+        # Legacy
+        entry = self.url_entries.get(url)
 
         if entry is None:
             return False
 
-        if priority is None:
-            priority = entry["priority"]
+        entry["state"] = "crawled"
+        entry["last_crawled_at"] = time.time()
 
-        if available_at is None:
-            available_at = time.time()
+        self.leased_entries.pop(url, None)
 
-        new_entry = {
-            "url": url,
-            "priority": float(priority),
-            "available_at": float(available_at),
-            "sequence": self.sequence
-        }
+        self._save()
+
+        return True
+
+    def release(self, url, retry_at=None):
+        if self.state_store is not None:
+            if retry_at is None:
+                retry_at = time.time()
+
+            result = self.state_store.release_lease(
+                url,
+                retry_at=retry_at,
+                increment_attempts=False,
+            )
+
+            self.leased_entries.pop(url, None)
+
+            return result
+
+        # Legacy
+        entry = self.url_entries.get(url)
+
+        if entry is None:
+            return False
+
+        if retry_at is None:
+            retry_at = time.time()
+
+        entry["state"] = "retry"
+        entry["available_at"] = float(retry_at)
+
+        self.leased_entries.pop(url, None)
 
         self.sequence += 1
-
-        self.url_entries[url] = new_entry
 
         heapq.heappush(
             self.heap,
             (
-                -float(new_entry["priority"]),
-                new_entry["available_at"],
-                new_entry["sequence"],
-                url
-            )
+                -entry["priority"],
+                entry["available_at"],
+                self.sequence,
+                url,
+            ),
         )
 
         self._save()
@@ -296,236 +371,301 @@ class CrawlFrontier:
         return True
 
     def recover_leases(self):
+        if self.state_store is not None:
+            recovered = self.state_store.recover_expired_leases(
+                lease_timeout=0
+            )
 
+            self.leased_entries.clear()
+
+            return recovered
+
+        # Legacy
         recovered = 0
 
         for url, entry in list(
             self.leased_entries.items()
         ):
-            self.leased_entries.pop(
-                url,
-                None
-            )
-
-            new_entry = {
-                "url": url,
-                "priority": float(
-                    entry.get("priority", 50)
-                ),
-                "available_at": time.time(),
-                "sequence": self.sequence
-            }
+            entry["state"] = "retry"
+            entry["available_at"] = time.time()
 
             self.sequence += 1
-
-            self.url_entries[url] = new_entry
 
             heapq.heappush(
                 self.heap,
                 (
-                    -new_entry["priority"],
-                    new_entry["available_at"],
-                    new_entry["sequence"],
-                    url
-                )
+                    -entry["priority"],
+                    entry["available_at"],
+                    self.sequence,
+                    url,
+                ),
             )
 
             recovered += 1
 
-        if recovered:
-            self._save()
+        self.leased_entries.clear()
+
+        self._save()
 
         return recovered
 
     def mark_crawled(self, url):
+        if self.state_store is not None:
+            result = self.state_store.mark_crawled(url)
 
-        domain = self._domain(url)
+            self.leased_entries.pop(url, None)
 
-        self._ensure_domain(domain)
+            return result
 
-        self.domains[
-            domain
-        ]["last_crawl_time"] = time.time()
+        entry = self.url_entries.get(url)
 
-        self._save()
-
-    def mark_failed(self, url):
-
-        domain = self._domain(url)
-
-        self._ensure_domain(domain)
-
-        failures = self.domains[
-            domain
-        ]["failures"]
-
-        failures[url] = (
-            failures.get(url, 0) + 1
-        )
-
-        count = failures[url]
-
-        if count <= self.max_retries:
-
-            delay = min(
-                60 * (2 ** (count - 1)),
-                3600
-            )
-
-            self.release(
-                url,
-                priority=max(
-                    1,
-                    50 - count * 10
-                ),
-                available_at=time.time() + delay
-            )
-
-            return True
-
-        self.leased_entries.pop(
-            url,
-            None
-        )
-
-        self._save()
-
-        return False
-
-    def reprioritize(
-        self,
-        url,
-        priority
-    ):
-        if url not in self.url_entries:
+        if entry is None:
             return False
 
-        entry = self.url_entries[url]
+        entry["state"] = "crawled"
+        entry["last_crawled_at"] = time.time()
 
-        entry["priority"] = float(
-            priority
+        self.leased_entries.pop(url, None)
+
+        self._save()
+
+        return True
+
+    def mark_failed(
+        self,
+        url,
+        error=None,
+        retry_delay=30,
+    ):
+        if self.state_store is not None:
+            entry = self.state_store.get(url)
+
+            if entry is None:
+                return False
+
+            attempts = int(
+                entry.get("attempts", 0)
+            )
+
+            self.leased_entries.pop(url, None)
+
+            if attempts >= self.max_retries:
+                return self.state_store.mark_failed(
+                    url,
+                    error=error,
+                    retry_at=None,
+                )
+
+            retry_at = (
+                time.time()
+                + float(retry_delay)
+            )
+
+            return self.state_store.mark_failed(
+                url,
+                error=error,
+                retry_at=retry_at,
+            )
+
+        # Legacy
+        entry = self.url_entries.get(url)
+
+        if entry is None:
+            return False
+
+        entry["attempts"] += 1
+        entry["last_error"] = error
+
+        self.leased_entries.pop(url, None)
+
+        if entry["attempts"] >= self.max_retries:
+            entry["state"] = "failed"
+
+            self._save()
+
+            return False
+
+        entry["state"] = "retry"
+
+        entry["available_at"] = (
+            time.time()
+            + float(retry_delay)
         )
-
-        entry["sequence"] = self.sequence
 
         self.sequence += 1
 
         heapq.heappush(
             self.heap,
             (
-                -float(priority),
+                -entry["priority"],
                 entry["available_at"],
-                entry["sequence"],
-                url
-            )
+                self.sequence,
+                url,
+            ),
         )
 
         self._save()
 
         return True
 
-    def get_state(self):
-
-        return {
-            "version": 3,
-            "domains": self.domains,
-            "url_entries": self.url_entries,
-            "leased_entries": self.leased_entries,
-            "sequence": self.sequence
-        }
-
-    def load_state(self, state):
-
-        if not state:
-            return
-
-        self.domains = dict(
-            state.get(
-                "domains",
-                {}
-            )
-        )
-
-        for domain, data in self.domains.items():
-
-            data.setdefault(
-                "next_allowed_time",
-                0
+    def reprioritize(self, url, priority):
+        if self.state_store is not None:
+            return self.state_store.update_priority(
+                url,
+                priority,
             )
 
-            data.setdefault(
-                "last_crawl_time",
-                0
-            )
+        entry = self.url_entries.get(url)
 
-            data.setdefault(
-                "crawl_delay",
-                self.default_delay
-            )
+        if entry is None:
+            return False
 
-            data.setdefault(
-                "failures",
-                {}
-            )
+        entry["priority"] = float(priority)
 
-        self.url_entries = dict(
-            state.get(
-                "url_entries",
-                {}
-            )
-        )
-
-        self.leased_entries = dict(
-            state.get(
-                "leased_entries",
-                {}
-            )
-        )
-
-        self.sequence = int(
-            state.get(
-                "sequence",
-                0
-            )
-        )
-
-        self.heap = []
-
-        for url, entry in (
-            self.url_entries.items()
-        ):
+        if entry["state"] in ("queued", "retry"):
+            self.sequence += 1
 
             heapq.heappush(
                 self.heap,
                 (
-                    -float(
-                        entry.get(
-                            "priority",
-                            50
-                        )
-                    ),
-                    float(
-                        entry.get(
-                            "available_at",
-                            time.time()
-                        )
-                    ),
-                    int(
-                        entry.get(
-                            "sequence",
-                            0
-                        )
-                    ),
-                    url
-                )
+                    -entry["priority"],
+                    entry["available_at"],
+                    self.sequence,
+                    url,
+                ),
             )
 
-    def clear(self):
+        self._save()
 
-        self.domains = {}
-        self.url_entries = {}
-        self.leased_entries = {}
+        return True
+
+    # ------------------------------------------------------------------
+    # Legacy domain scheduling
+    # ------------------------------------------------------------------
+
+    def _domain_ready(self, domain, now):
+        info = self.domains.get(domain)
+
+        if info is None:
+            return True
+
+        return (
+            now >= info["next_allowed_time"]
+        )
+
+    def _reserve_domain(self, domain, now):
+        info = self.domains.setdefault(
+            domain,
+            {
+                "crawl_delay": self.default_delay,
+                "last_crawl_time": 0,
+                "next_allowed_time": 0,
+                "failures": 0,
+            },
+        )
+
+        info["last_crawl_time"] = now
+
+        info["next_allowed_time"] = (
+            now
+            + info["crawl_delay"]
+        )
+
+    # ------------------------------------------------------------------
+    # Legacy persistence
+    # ------------------------------------------------------------------
+
+    def _save(self):
+        if self.state_store is not None:
+            return
+
+        self.storage.save(
+            self.get_state()
+        )
+
+    def get_state(self):
+        return {
+            "domains": self.domains,
+            "url_entries": self.url_entries,
+            "leased_entries": self.leased_entries,
+            "sequence": self.sequence,
+            "default_delay": self.default_delay,
+            "max_retries": self.max_retries,
+        }
+
+    def load_state(self, state):
+        self.domains = state.get(
+            "domains",
+            {},
+        )
+
+        self.url_entries = state.get(
+            "url_entries",
+            {},
+        )
+
+        self.leased_entries = state.get(
+            "leased_entries",
+            {},
+        )
+
+        self.sequence = state.get(
+            "sequence",
+            0,
+        )
+
+        self.default_delay = float(
+            state.get(
+                "default_delay",
+                self.default_delay,
+            )
+        )
+
+        self.max_retries = int(
+            state.get(
+                "max_retries",
+                self.max_retries,
+            )
+        )
+
         self.heap = []
+
+        for url, entry in self.url_entries.items():
+            if entry["state"] in (
+                "queued",
+                "retry",
+            ):
+                self.sequence += 1
+
+                heapq.heappush(
+                    self.heap,
+                    (
+                        -float(
+                            entry["priority"]
+                        ),
+                        float(
+                            entry.get(
+                                "available_at",
+                                0,
+                            )
+                        ),
+                        self.sequence,
+                        url,
+                    ),
+                )
+
+    def clear(self):
+        if self.state_store is not None:
+            result = self.state_store.clear()
+
+            self.leased_entries.clear()
+
+            return result
+
+        self.domains.clear()
+        self.url_entries.clear()
+        self.leased_entries.clear()
+        self.heap.clear()
         self.sequence = 0
 
         self._save()

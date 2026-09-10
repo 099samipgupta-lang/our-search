@@ -9,26 +9,38 @@ class URLStateStore:
     """
     Durable SQLite-backed state store for OUR SEARCH crawler URLs.
 
-    This is the first local persistence layer for crawler state.
-    The interface is intentionally independent from the existing
-    frontier and crawler implementation so it can be replaced by
-    distributed storage later.
+    This store contains the durable state required by the crawler
+    frontier. The interface is intentionally independent from the
+    current frontier implementation so the storage layer can later
+    be replaced by distributed storage.
     """
 
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
 
-    def __init__(self, database_path: str = "crawler_storage/url_state.db"):
-        self.database_path = os.path.abspath(database_path)
+    def __init__(
+        self,
+        database_path: str = "crawler_storage/url_state.db"
+    ):
+        self.database_path = os.path.abspath(
+            database_path
+        )
 
-        directory = os.path.dirname(self.database_path)
+        directory = os.path.dirname(
+            self.database_path
+        )
+
         if directory:
-            os.makedirs(directory, exist_ok=True)
+            os.makedirs(
+                directory,
+                exist_ok=True
+            )
 
         self._lock = threading.RLock()
+
         self._connection = sqlite3.connect(
             self.database_path,
             timeout=30,
-            check_same_thread=False,
+            check_same_thread=False
         )
 
         self._connection.row_factory = sqlite3.Row
@@ -37,16 +49,22 @@ class URLStateStore:
         self._initialize_schema()
 
     def _configure(self) -> None:
-        """Configure SQLite for reliable local crawler-state storage."""
+        """Configure SQLite for reliable local crawler state."""
 
         with self._connection:
-            self._connection.execute("PRAGMA foreign_keys = ON")
-            self._connection.execute("PRAGMA busy_timeout = 30000")
+            self._connection.execute(
+                "PRAGMA foreign_keys = ON"
+            )
+
+            self._connection.execute(
+                "PRAGMA busy_timeout = 30000"
+            )
 
     def _initialize_schema(self) -> None:
-        """Create the crawler URL-state schema if it does not exist."""
+        """Create or upgrade the crawler state schema."""
 
         with self._lock:
+
             self._connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS metadata (
@@ -80,8 +98,24 @@ class URLStateStore:
                     leased_at REAL
                 );
 
+                CREATE TABLE IF NOT EXISTS hosts (
+                    host TEXT PRIMARY KEY,
+
+                    crawl_delay REAL NOT NULL DEFAULT 2.0,
+
+                    last_crawl_time REAL NOT NULL DEFAULT 0,
+
+                    next_allowed_time REAL NOT NULL DEFAULT 0,
+
+                    failures INTEGER NOT NULL DEFAULT 0
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_urls_state_priority
-                ON urls(state, priority DESC, next_crawl_at);
+                ON urls(
+                    state,
+                    priority DESC,
+                    next_crawl_at
+                );
 
                 CREATE INDEX IF NOT EXISTS idx_urls_host
                 ON urls(host);
@@ -92,12 +126,29 @@ class URLStateStore:
                 CREATE INDEX IF NOT EXISTS idx_urls_lease
                 ON urls(state, leased_at);
 
-                INSERT OR IGNORE INTO metadata(key, value)
-                VALUES ('schema_version', '1');
+                CREATE INDEX IF NOT EXISTS idx_hosts_next_allowed
+                ON hosts(next_allowed_time);
+
+                INSERT OR IGNORE INTO metadata(
+                    key,
+                    value
+                )
+                VALUES (
+                    'schema_version',
+                    '2'
+                );
+
+                UPDATE metadata
+                SET value = '2'
+                WHERE key = 'schema_version';
                 """
             )
 
             self._connection.commit()
+
+    # ============================================================
+    # URL INSERTION
+    # ============================================================
 
     def add_discovered(
         self,
@@ -111,23 +162,32 @@ class URLStateStore:
         """
         Add a URL if it does not already exist.
 
-        Returns:
-            True  -> URL was newly inserted.
-            False -> URL already existed.
+        Returns True only when a new URL is inserted.
         """
 
         if not url:
-            raise ValueError("url must not be empty")
+            raise ValueError(
+                "url must not be empty"
+            )
 
         if not document_id:
-            raise ValueError("document_id must not be empty")
+            raise ValueError(
+                "document_id must not be empty"
+            )
 
         if not host:
-            raise ValueError("host must not be empty")
+            raise ValueError(
+                "host must not be empty"
+            )
 
-        timestamp = time.time() if discovered_at is None else discovered_at
+        timestamp = (
+            time.time()
+            if discovered_at is None
+            else discovered_at
+        )
 
         with self._lock:
+
             cursor = self._connection.execute(
                 """
                 INSERT OR IGNORE INTO urls (
@@ -140,7 +200,16 @@ class URLStateStore:
                     source,
                     discovered_at
                 )
-                VALUES (?, ?, ?, 'discovered', ?, 0, ?, ?)
+                VALUES (
+                    ?,
+                    ?,
+                    ?,
+                    'discovered',
+                    ?,
+                    0,
+                    ?,
+                    ?
+                )
                 """,
                 (
                     url,
@@ -149,24 +218,46 @@ class URLStateStore:
                     float(priority),
                     source,
                     timestamp,
-                ),
+                )
+            )
+
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO hosts (
+                    host
+                )
+                VALUES (?)
+                """,
+                (
+                    host,
+                )
             )
 
             self._connection.commit()
 
             return cursor.rowcount == 1
 
-    def get(self, url: str) -> Optional[Dict[str, Any]]:
+    # ============================================================
+    # URL READ
+    # ============================================================
+
+    def get(
+        self,
+        url: str
+    ) -> Optional[Dict[str, Any]]:
         """Return one URL record or None."""
 
         with self._lock:
+
             row = self._connection.execute(
                 """
                 SELECT *
                 FROM urls
                 WHERE url = ?
                 """,
-                (url,),
+                (
+                    url,
+                )
             ).fetchone()
 
         if row is None:
@@ -174,10 +265,14 @@ class URLStateStore:
 
         return dict(row)
 
-    def exists(self, url: str) -> bool:
-        """Return True if the URL is known to the crawler."""
+    def exists(
+        self,
+        url: str
+    ) -> bool:
+        """Return True when the URL exists."""
 
         with self._lock:
+
             row = self._connection.execute(
                 """
                 SELECT 1
@@ -185,58 +280,354 @@ class URLStateStore:
                 WHERE url = ?
                 LIMIT 1
                 """,
-                (url,),
+                (
+                    url,
+                )
             ).fetchone()
 
         return row is not None
 
+    # ============================================================
+    # URL QUEUE STATE
+    # ============================================================
+
+    def mark_queued(
+        self,
+        url: str,
+        priority: Optional[float] = None,
+        next_crawl_at: Optional[float] = None
+    ) -> bool:
+        """
+        Move a discovered/retry URL into queued state.
+
+        Priority and next_crawl_at can be updated atomically.
+        """
+
+        with self._lock:
+
+            if priority is None:
+
+                cursor = self._connection.execute(
+                    """
+                    UPDATE urls
+                    SET
+                        state = 'queued',
+                        next_crawl_at = ?
+                    WHERE url = ?
+                      AND state IN (
+                          'discovered',
+                          'retry'
+                      )
+                    """,
+                    (
+                        next_crawl_at,
+                        url,
+                    )
+                )
+
+            else:
+
+                cursor = self._connection.execute(
+                    """
+                    UPDATE urls
+                    SET
+                        state = 'queued',
+                        priority = ?,
+                        next_crawl_at = ?
+                    WHERE url = ?
+                      AND state IN (
+                          'discovered',
+                          'retry'
+                      )
+                    """,
+                    (
+                        float(priority),
+                        next_crawl_at,
+                        url,
+                    )
+                )
+
+            self._connection.commit()
+
+            return cursor.rowcount == 1
+
+    # ============================================================
+    # HOST STATE
+    # ============================================================
+
+    def ensure_host(
+        self,
+        host: str,
+        crawl_delay: float = 2.0
+    ) -> Dict[str, Any]:
+        """Create a host record if necessary and return it."""
+
+        if not host:
+            raise ValueError(
+                "host must not be empty"
+            )
+
+        with self._lock:
+
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO hosts (
+                    host,
+                    crawl_delay
+                )
+                VALUES (
+                    ?,
+                    ?
+                )
+                """,
+                (
+                    host,
+                    float(crawl_delay),
+                )
+            )
+
+            self._connection.commit()
+
+            return self.get_host(
+                host
+            )
+
+    def get_host(
+        self,
+        host: str
+    ) -> Optional[Dict[str, Any]]:
+        """Return host scheduling state."""
+
+        with self._lock:
+
+            row = self._connection.execute(
+                """
+                SELECT *
+                FROM hosts
+                WHERE host = ?
+                """,
+                (
+                    host,
+                )
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return dict(row)
+
+    def set_host_delay(
+        self,
+        host: str,
+        crawl_delay: float
+    ) -> bool:
+        """Set the crawl delay for a host."""
+
+        if crawl_delay < 0:
+            raise ValueError(
+                "crawl_delay must not be negative"
+            )
+
+        with self._lock:
+
+            cursor = self._connection.execute(
+                """
+                UPDATE hosts
+                SET crawl_delay = ?
+                WHERE host = ?
+                """,
+                (
+                    float(crawl_delay),
+                    host,
+                )
+            )
+
+            self._connection.commit()
+
+            return cursor.rowcount == 1
+
+    def reserve_host(
+        self,
+        host: str,
+        now: Optional[float] = None
+    ) -> Optional[float]:
+        """
+        Reserve the next crawl slot for a host.
+
+        Returns the reserved timestamp.
+        """
+
+        timestamp = (
+            time.time()
+            if now is None
+            else float(now)
+        )
+
+        with self._lock:
+
+            row = self._connection.execute(
+                """
+                SELECT
+                    crawl_delay,
+                    next_allowed_time
+                FROM hosts
+                WHERE host = ?
+                """,
+                (
+                    host,
+                )
+            ).fetchone()
+
+            if row is None:
+                return None
+
+            current_ready = float(
+                row["next_allowed_time"]
+            )
+
+            delay = float(
+                row["crawl_delay"]
+            )
+
+            reserved_time = (
+                max(
+                    current_ready,
+                    timestamp
+                )
+                + delay
+            )
+
+            self._connection.execute(
+                """
+                UPDATE hosts
+                SET next_allowed_time = ?
+                WHERE host = ?
+                """,
+                (
+                    reserved_time,
+                    host,
+                )
+            )
+
+            self._connection.commit()
+
+            return reserved_time
+
+    def mark_host_crawled(
+        self,
+        host: str,
+        crawled_at: Optional[float] = None
+    ) -> bool:
+        """Record the last crawl time for a host."""
+
+        timestamp = (
+            time.time()
+            if crawled_at is None
+            else float(crawled_at)
+        )
+
+        with self._lock:
+
+            cursor = self._connection.execute(
+                """
+                UPDATE hosts
+                SET last_crawl_time = ?
+                WHERE host = ?
+                """,
+                (
+                    timestamp,
+                    host,
+                )
+            )
+
+            self._connection.commit()
+
+            return cursor.rowcount == 1
+
+    # ============================================================
+    # ATOMIC CLAIM
+    # ============================================================
+
     def claim_next(
         self,
         owner: str,
-        now: Optional[float] = None,
+        now: Optional[float] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Atomically claim the highest-priority URL that is ready.
+        Atomically claim the highest-priority ready URL.
 
-        Only one claimant can successfully transition the selected
-        URL into the 'leased' state during the transaction.
+        Host crawl timing is respected inside the same transaction.
         """
 
         if not owner:
-            raise ValueError("owner must not be empty")
+            raise ValueError(
+                "owner must not be empty"
+            )
 
-        timestamp = time.time() if now is None else now
+        timestamp = (
+            time.time()
+            if now is None
+            else float(now)
+        )
 
         with self._lock:
+
             connection = self._connection
 
             try:
-                connection.execute("BEGIN IMMEDIATE")
+
+                connection.execute(
+                    "BEGIN IMMEDIATE"
+                )
 
                 row = connection.execute(
                     """
-                    SELECT *
-                    FROM urls
-                    WHERE state IN ('discovered', 'queued', 'retry')
-                      AND (
-                          next_crawl_at IS NULL
-                          OR next_crawl_at <= ?
-                      )
+                    SELECT
+                        u.*,
+                        h.crawl_delay,
+                        h.last_crawl_time,
+                        h.next_allowed_time
+                    FROM urls AS u
+                    JOIN hosts AS h
+                        ON h.host = u.host
+                    WHERE u.state IN (
+                        'discovered',
+                        'queued',
+                        'retry'
+                    )
+                    AND (
+                        u.next_crawl_at IS NULL
+                        OR u.next_crawl_at <= ?
+                    )
+                    AND MAX(
+                        h.last_crawl_time
+                        + h.crawl_delay,
+                        h.next_allowed_time
+                    ) <= ?
                     ORDER BY
-                        priority DESC,
-                        COALESCE(next_crawl_at, 0) ASC,
-                        discovered_at ASC,
-                        url ASC
+                        u.priority DESC,
+                        COALESCE(
+                            u.next_crawl_at,
+                            0
+                        ) ASC,
+                        u.discovered_at ASC,
+                        u.url ASC
                     LIMIT 1
                     """,
-                    (timestamp,),
+                    (
+                        timestamp,
+                        timestamp,
+                    )
                 ).fetchone()
 
                 if row is None:
+
                     connection.rollback()
+
                     return None
 
                 url = row["url"]
+                host = row["host"]
 
                 cursor = connection.execute(
                     """
@@ -246,18 +637,57 @@ class URLStateStore:
                         lease_owner = ?,
                         leased_at = ?
                     WHERE url = ?
-                      AND state IN ('discovered', 'queued', 'retry')
+                      AND state IN (
+                          'discovered',
+                          'queued',
+                          'retry'
+                      )
                     """,
                     (
                         owner,
                         timestamp,
                         url,
-                    ),
+                    )
                 )
 
                 if cursor.rowcount != 1:
+
                     connection.rollback()
+
                     return None
+
+                current_ready = max(
+                    float(
+                        row["last_crawl_time"]
+                    )
+                    + float(
+                        row["crawl_delay"]
+                    ),
+                    float(
+                        row["next_allowed_time"]
+                    ),
+                    timestamp
+                )
+
+                reserved_time = (
+                    current_ready
+                    + float(
+                        row["crawl_delay"]
+                    )
+                )
+
+                connection.execute(
+                    """
+                    UPDATE hosts
+                    SET
+                        next_allowed_time = ?
+                    WHERE host = ?
+                    """,
+                    (
+                        reserved_time,
+                        host,
+                    )
+                )
 
                 claimed = connection.execute(
                     """
@@ -265,47 +695,60 @@ class URLStateStore:
                     FROM urls
                     WHERE url = ?
                     """,
-                    (url,),
+                    (
+                        url,
+                    )
                 ).fetchone()
 
                 connection.commit()
 
-                return dict(claimed)
+                return dict(
+                    claimed
+                )
 
             except Exception:
+
                 connection.rollback()
+
                 raise
 
-    def mark_queued(self, url: str) -> bool:
-        """Move a discovered URL into the queued state."""
-
-        with self._lock:
-            cursor = self._connection.execute(
-                """
-                UPDATE urls
-                SET state = 'queued'
-                WHERE url = ?
-                  AND state = 'discovered'
-                """,
-                (url,),
-            )
-
-            self._connection.commit()
-
-            return cursor.rowcount == 1
+    # ============================================================
+    # COMPLETE
+    # ============================================================
 
     def mark_crawled(
         self,
         url: str,
         status: Optional[int] = None,
         crawled_at: Optional[float] = None,
-        next_crawl_at: Optional[float] = None,
+        next_crawl_at: Optional[float] = None
     ) -> bool:
-        """Mark a leased URL as successfully crawled."""
+        """Mark a URL as successfully crawled."""
 
-        timestamp = time.time() if crawled_at is None else crawled_at
+        timestamp = (
+            time.time()
+            if crawled_at is None
+            else float(crawled_at)
+        )
 
         with self._lock:
+
+            row = self._connection.execute(
+                """
+                SELECT host
+                FROM urls
+                WHERE url = ?
+                """,
+                (
+                    url,
+                )
+            ).fetchone()
+
+            if row is None:
+                return False
+
+            host = row["host"]
+
             cursor = self._connection.execute(
                 """
                 UPDATE urls
@@ -314,6 +757,7 @@ class URLStateStore:
                     last_crawled_at = ?,
                     next_crawl_at = ?,
                     last_status = ?,
+                    last_error = NULL,
                     lease_owner = NULL,
                     leased_at = NULL
                 WHERE url = ?
@@ -323,30 +767,48 @@ class URLStateStore:
                     next_crawl_at,
                     status,
                     url,
-                ),
+                )
             )
+
+            if cursor.rowcount == 1:
+
+                self._connection.execute(
+                    """
+                    UPDATE hosts
+                    SET last_crawl_time = ?
+                    WHERE host = ?
+                    """,
+                    (
+                        timestamp,
+                        host,
+                    )
+                )
 
             self._connection.commit()
 
             return cursor.rowcount == 1
+
+    # ============================================================
+    # FAILURE / RETRY
+    # ============================================================
 
     def mark_failed(
         self,
         url: str,
         error: Optional[str] = None,
         status: Optional[int] = None,
-        retry_at: Optional[float] = None,
+        retry_at: Optional[float] = None
     ) -> bool:
-        """
-        Mark a URL as failed.
+        """Mark a URL as failed or retry."""
 
-        If retry_at is supplied, the URL becomes 'retry'.
-        Otherwise it becomes 'failed'.
-        """
-
-        state = "retry" if retry_at is not None else "failed"
+        state = (
+            "retry"
+            if retry_at is not None
+            else "failed"
+        )
 
         with self._lock:
+
             cursor = self._connection.execute(
                 """
                 UPDATE urls
@@ -366,7 +828,7 @@ class URLStateStore:
                     error,
                     retry_at,
                     url,
-                ),
+                )
             )
 
             self._connection.commit()
@@ -377,19 +839,20 @@ class URLStateStore:
         self,
         url: str,
         retry_at: Optional[float] = None,
-        increment_attempts: bool = False,
+        increment_attempts: bool = False
     ) -> bool:
-        """
-        Release a leased URL back into the crawler.
+        """Release a leased URL back to the queue."""
 
-        The URL becomes 'retry' when retry_at is supplied,
-        otherwise it becomes 'queued'.
-        """
-
-        state = "retry" if retry_at is not None else "queued"
+        state = (
+            "retry"
+            if retry_at is not None
+            else "queued"
+        )
 
         with self._lock:
+
             if increment_attempts:
+
                 cursor = self._connection.execute(
                     """
                     UPDATE urls
@@ -406,9 +869,11 @@ class URLStateStore:
                         state,
                         retry_at,
                         url,
-                    ),
+                    )
                 )
+
             else:
+
                 cursor = self._connection.execute(
                     """
                     UPDATE urls
@@ -424,32 +889,42 @@ class URLStateStore:
                         state,
                         retry_at,
                         url,
-                    ),
+                    )
                 )
 
             self._connection.commit()
 
             return cursor.rowcount == 1
 
+    # ============================================================
+    # LEASE RECOVERY
+    # ============================================================
+
     def recover_expired_leases(
         self,
         lease_timeout: float,
-        now: Optional[float] = None,
+        now: Optional[float] = None
     ) -> int:
-        """
-        Recover leases older than lease_timeout.
-
-        This protects the crawler from permanently losing URLs when
-        a worker disappears.
-        """
+        """Recover leases belonging to dead workers."""
 
         if lease_timeout < 0:
-            raise ValueError("lease_timeout must not be negative")
+            raise ValueError(
+                "lease_timeout must not be negative"
+            )
 
-        timestamp = time.time() if now is None else now
-        cutoff = timestamp - lease_timeout
+        timestamp = (
+            time.time()
+            if now is None
+            else float(now)
+        )
+
+        cutoff = (
+            timestamp
+            - float(lease_timeout)
+        )
 
         with self._lock:
+
             cursor = self._connection.execute(
                 """
                 UPDATE urls
@@ -465,43 +940,61 @@ class URLStateStore:
                 (
                     timestamp,
                     cutoff,
-                ),
+                )
             )
 
             self._connection.commit()
 
             return cursor.rowcount
 
-    def count(self, state: Optional[str] = None) -> int:
-        """Return URL count, optionally filtered by state."""
+    # ============================================================
+    # COUNTS / LISTS
+    # ============================================================
+
+    def count(
+        self,
+        state: Optional[str] = None
+    ) -> int:
+        """Return URL count."""
 
         with self._lock:
+
             if state is None:
+
                 row = self._connection.execute(
                     """
                     SELECT COUNT(*)
                     FROM urls
                     """
                 ).fetchone()
+
             else:
+
                 row = self._connection.execute(
                     """
                     SELECT COUNT(*)
                     FROM urls
                     WHERE state = ?
                     """,
-                    (state,),
+                    (
+                        state,
+                    )
                 ).fetchone()
 
-        return int(row[0])
+        return int(
+            row[0]
+        )
 
     def counts(self) -> Dict[str, int]:
-        """Return counts grouped by crawler state."""
+        """Return URL counts grouped by state."""
 
         with self._lock:
+
             rows = self._connection.execute(
                 """
-                SELECT state, COUNT(*) AS count
+                SELECT
+                    state,
+                    COUNT(*) AS count
                 FROM urls
                 GROUP BY state
                 ORDER BY state
@@ -509,14 +1002,16 @@ class URLStateStore:
             ).fetchall()
 
         return {
-            row["state"]: int(row["count"])
+            row["state"]: int(
+                row["count"]
+            )
             for row in rows
         }
 
     def list_by_state(
         self,
         state: str,
-        limit: int = 100,
+        limit: int = 100
     ) -> List[Dict[str, Any]]:
         """Return URLs in a particular state."""
 
@@ -524,32 +1019,53 @@ class URLStateStore:
             return []
 
         with self._lock:
+
             rows = self._connection.execute(
                 """
                 SELECT *
                 FROM urls
                 WHERE state = ?
-                ORDER BY priority DESC, discovered_at ASC, url ASC
+                ORDER BY
+                    priority DESC,
+                    discovered_at ASC,
+                    url ASC
                 LIMIT ?
                 """,
                 (
                     state,
                     int(limit),
-                ),
+                )
             ).fetchall()
 
-        return [dict(row) for row in rows]
+        return [
+            dict(row)
+            for row in rows
+        ]
+
+    # ============================================================
+    # CLOSE
+    # ============================================================
 
     def close(self) -> None:
         """Close the SQLite connection."""
 
         with self._lock:
+
             if self._connection is not None:
+
                 self._connection.close()
+
                 self._connection = None
 
     def __enter__(self):
+
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback):
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback
+    ):
+
         self.close()
