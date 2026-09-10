@@ -15,7 +15,7 @@ class URLStateStore:
     be replaced by distributed storage.
     """
 
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 3
 
     def __init__(
         self,
@@ -48,6 +48,10 @@ class URLStateStore:
         self._configure()
         self._initialize_schema()
 
+    # ============================================================
+    # SQLITE CONFIGURATION
+    # ============================================================
+
     def _configure(self) -> None:
         """Configure SQLite for reliable local crawler state."""
 
@@ -59,6 +63,10 @@ class URLStateStore:
             self._connection.execute(
                 "PRAGMA busy_timeout = 30000"
             )
+
+    # ============================================================
+    # SCHEMA
+    # ============================================================
 
     def _initialize_schema(self) -> None:
         """Create or upgrade the crawler state schema."""
@@ -137,11 +145,61 @@ class URLStateStore:
                     'schema_version',
                     '2'
                 );
-
-                UPDATE metadata
-                SET value = '2'
-                WHERE key = 'schema_version';
                 """
+            )
+
+            # ----------------------------------------------------
+            # MIGRATION: v2 -> v3
+            # ----------------------------------------------------
+
+            columns = {
+                row["name"]
+                for row in self._connection.execute(
+                    "PRAGMA table_info(urls)"
+                ).fetchall()
+            }
+
+            if "etag" not in columns:
+                self._connection.execute(
+                    """
+                    ALTER TABLE urls
+                    ADD COLUMN etag TEXT
+                    """
+                )
+
+            if "last_modified" not in columns:
+                self._connection.execute(
+                    """
+                    ALTER TABLE urls
+                    ADD COLUMN last_modified TEXT
+                    """
+                )
+
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO metadata(
+                    key,
+                    value
+                )
+                VALUES (
+                    'schema_version',
+                    ?
+                )
+                """,
+                (
+                    str(self.SCHEMA_VERSION),
+                )
+            )
+
+            self._connection.execute(
+                """
+                UPDATE metadata
+                SET value = ?
+                WHERE key = 'schema_version'
+                """,
+                (
+                    str(self.SCHEMA_VERSION),
+                )
             )
 
             self._connection.commit()
@@ -157,7 +215,7 @@ class URLStateStore:
         host: str,
         priority: float = 50.0,
         source: Optional[str] = None,
-        discovered_at: Optional[float] = None,
+        discovered_at: Optional[float] = None
     ) -> bool:
         """
         Add a URL if it does not already exist.
@@ -679,8 +737,7 @@ class URLStateStore:
                 connection.execute(
                     """
                     UPDATE hosts
-                    SET
-                        next_allowed_time = ?
+                    SET next_allowed_time = ?
                     WHERE host = ?
                     """,
                     (
@@ -721,9 +778,16 @@ class URLStateStore:
         url: str,
         status: Optional[int] = None,
         crawled_at: Optional[float] = None,
-        next_crawl_at: Optional[float] = None
+        next_crawl_at: Optional[float] = None,
+        etag: Optional[str] = None,
+        last_modified: Optional[str] = None
     ) -> bool:
-        """Mark a URL as successfully crawled."""
+        """
+        Mark a URL as successfully crawled.
+
+        HTTP cache validators are persisted so future recrawls
+        can use conditional requests.
+        """
 
         timestamp = (
             time.time()
@@ -759,13 +823,17 @@ class URLStateStore:
                     last_status = ?,
                     last_error = NULL,
                     lease_owner = NULL,
-                    leased_at = NULL
+                    leased_at = NULL,
+                    etag = ?,
+                    last_modified = ?
                 WHERE url = ?
                 """,
                 (
                     timestamp,
                     next_crawl_at,
                     status,
+                    etag,
+                    last_modified,
                     url,
                 )
             )
@@ -930,6 +998,7 @@ class URLStateStore:
                 UPDATE urls
                 SET
                     state = 'retry',
+                    attempts = attempts + 1,
                     next_crawl_at = ?,
                     lease_owner = NULL,
                     leased_at = NULL
@@ -948,14 +1017,62 @@ class URLStateStore:
             return cursor.rowcount
 
     # ============================================================
-    # COUNTS / LISTS
+    # PRIORITY
+    # ============================================================
+
+    def update_priority(
+        self,
+        url: str,
+        priority: float
+    ) -> bool:
+        """Update the priority of an existing URL."""
+
+        with self._lock:
+
+            cursor = self._connection.execute(
+                """
+                UPDATE urls
+                SET priority = ?
+                WHERE url = ?
+                """,
+                (
+                    float(priority),
+                    url,
+                )
+            )
+
+            self._connection.commit()
+
+            return cursor.rowcount == 1
+
+    # ============================================================
+    # CLEAR
+    # ============================================================
+
+    def clear(self) -> None:
+        """Clear all durable URL and host state."""
+
+        with self._lock:
+
+            self._connection.execute(
+                "DELETE FROM urls"
+            )
+
+            self._connection.execute(
+                "DELETE FROM hosts"
+            )
+
+            self._connection.commit()
+
+    # ============================================================
+    # COUNTS
     # ============================================================
 
     def count(
         self,
         state: Optional[str] = None
     ) -> int:
-        """Return URL count."""
+        """Return the number of URLs, optionally filtered by state."""
 
         with self._lock:
 
@@ -963,7 +1080,7 @@ class URLStateStore:
 
                 row = self._connection.execute(
                     """
-                    SELECT COUNT(*)
+                    SELECT COUNT(*) AS count
                     FROM urls
                     """
                 ).fetchone()
@@ -972,7 +1089,7 @@ class URLStateStore:
 
                 row = self._connection.execute(
                     """
-                    SELECT COUNT(*)
+                    SELECT COUNT(*) AS count
                     FROM urls
                     WHERE state = ?
                     """,
@@ -982,7 +1099,7 @@ class URLStateStore:
                 ).fetchone()
 
         return int(
-            row[0]
+            row["count"]
         )
 
     def counts(self) -> Dict[str, int]:
@@ -997,7 +1114,6 @@ class URLStateStore:
                     COUNT(*) AS count
                 FROM urls
                 GROUP BY state
-                ORDER BY state
                 """
             ).fetchall()
 
@@ -1013,7 +1129,7 @@ class URLStateStore:
         state: str,
         limit: int = 100
     ) -> List[Dict[str, Any]]:
-        """Return URLs in a particular state."""
+        """Return a limited list of URLs in a state."""
 
         if limit <= 0:
             return []
@@ -1054,11 +1170,13 @@ class URLStateStore:
             if self._connection is not None:
 
                 self._connection.close()
-
                 self._connection = None
 
-    def __enter__(self):
+    # ============================================================
+    # CONTEXT MANAGER
+    # ============================================================
 
+    def __enter__(self):
         return self
 
     def __exit__(
@@ -1067,5 +1185,4 @@ class URLStateStore:
         exc_value,
         traceback
     ):
-
         self.close()
