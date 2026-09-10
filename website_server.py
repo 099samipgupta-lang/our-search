@@ -10,10 +10,20 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 
 
 SEARCH_API = "https://my-platform-11.onrender.com/search"
+SEARCH_API_HEALTH = "https://my-platform-11.onrender.com/health"
 
 API_TIMEOUT = 30
-MAX_RETRIES = 1
-MAX_RETRY_DELAY = 5
+
+# Render Free services can take a while to wake.
+# We give the service a controlled readiness window
+# instead of exposing the cold-start error to the user.
+WAKE_TIMEOUT = 90
+
+# Delay between wake/readiness attempts.
+WAKE_RETRY_DELAY = 3
+
+# Delay between transient search API failures.
+SEARCH_RETRY_DELAY = 3
 
 
 def log(message):
@@ -32,6 +42,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
         try:
             super().do_GET()
+
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -60,6 +71,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                     "[SEARCH] API returned an invalid "
                     "'results' value"
                 )
+
                 results = []
 
             log(
@@ -88,10 +100,24 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             if error.code == 429:
                 self.send_search_error(
-                    "Search service is temporarily busy. "
-                    "Please try again in a moment.",
+                    "Search service is temporarily "
+                    "waking up. Please try again in "
+                    "a moment.",
                     status_code=503
                 )
+
+            elif error.code in (
+                502,
+                503,
+                504
+            ):
+                self.send_search_error(
+                    "Search service is temporarily "
+                    "unavailable. Please try again "
+                    "in a moment.",
+                    status_code=503
+                )
+
             else:
                 self.send_search_error(
                     f"Search service returned "
@@ -106,11 +132,15 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 f"reason={error.reason}"
             )
 
-            log("[SEARCH] Upstream connection traceback:")
+            log(
+                "[SEARCH] Upstream connection traceback:"
+            )
+
             traceback.print_exc()
 
             self.send_search_error(
-                "Could not connect to the search service.",
+                "The search service is waking up. "
+                "Please try again in a moment.",
                 status_code=503
             )
 
@@ -121,10 +151,12 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             )
 
             log("[SEARCH] Timeout traceback:")
+
             traceback.print_exc()
 
             self.send_search_error(
-                "The search service took too long to respond.",
+                "The search service took too long "
+                "to respond.",
                 status_code=504
             )
 
@@ -135,6 +167,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             )
 
             log("[SEARCH] JSON traceback:")
+
             traceback.print_exc()
 
             self.send_search_error(
@@ -149,7 +182,10 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 f"message={error}"
             )
 
-            log("[SEARCH] Unexpected error traceback:")
+            log(
+                "[SEARCH] Unexpected error traceback:"
+            )
+
             traceback.print_exc()
 
             self.send_search_error(
@@ -158,17 +194,158 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             )
 
     def request_search_api(self, query):
+        deadline = time.monotonic() + WAKE_TIMEOUT
+
+        log(
+            "[SEARCH] Beginning API readiness "
+            f"window of {WAKE_TIMEOUT} seconds"
+        )
+
+        # -------------------------------------------------
+        # PHASE 1
+        # Wake/check the API using the lightweight
+        # health endpoint.
+        # -------------------------------------------------
+
+        while True:
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                log(
+                    "[SEARCH] API readiness window "
+                    "expired"
+                )
+
+                raise urllib.error.URLError(
+                    "API did not become ready "
+                    "within the wake window"
+                )
+
+            log(
+                "[SEARCH] Checking API readiness: "
+                f"{SEARCH_API_HEALTH}"
+            )
+
+            health_request = urllib.request.Request(
+                SEARCH_API_HEALTH,
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "OurSearchWebsite/1.0",
+                    "Connection": "close",
+                },
+                method="GET",
+            )
+
+            try:
+                timeout = min(
+                    API_TIMEOUT,
+                    max(1, int(remaining))
+                )
+
+                with urllib.request.urlopen(
+                    health_request,
+                    timeout=timeout
+                ) as response:
+
+                    health_body = response.read()
+
+                    log(
+                        "[SEARCH] Health response: "
+                        f"status={response.status}, "
+                        f"reason={response.reason}"
+                    )
+
+                    log(
+                        "[SEARCH] Health response "
+                        f"bytes: {len(health_body)}"
+                    )
+
+                    if response.status in (
+                        200,
+                        204
+                    ):
+                        log(
+                            "[SEARCH] API is reachable "
+                            "and ready"
+                        )
+
+                        break
+
+            except urllib.error.HTTPError as error:
+                log(
+                    "[SEARCH] Health check HTTP error: "
+                    f"status={error.code}, "
+                    f"reason={error.reason}"
+                )
+
+                self.log_http_error(error)
+
+            except (
+                urllib.error.URLError,
+                TimeoutError
+            ) as error:
+                log(
+                    "[SEARCH] Health check connection "
+                    f"error: {error}"
+                )
+
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                log(
+                    "[SEARCH] No time remaining for "
+                    "another health check"
+                )
+
+                raise urllib.error.URLError(
+                    "API did not become ready"
+                )
+
+            delay = min(
+                WAKE_RETRY_DELAY,
+                remaining
+            )
+
+            log(
+                "[SEARCH] API not ready yet. "
+                f"Waiting {delay:.1f} seconds"
+            )
+
+            time.sleep(delay)
+
+        # -------------------------------------------------
+        # PHASE 2
+        # API is awake/reachable.
+        # Now perform the actual search.
+        # -------------------------------------------------
+
         request_data = json.dumps({
             "query": query,
             "mode": "OR",
             "top_k": 10
         }).encode("utf-8")
 
-        for attempt in range(MAX_RETRIES + 1):
+        search_attempt = 0
+
+        while True:
+            remaining = deadline - time.monotonic()
+
+            if remaining <= 0:
+                log(
+                    "[SEARCH] Search readiness window "
+                    "expired before successful search"
+                )
+
+                raise urllib.error.URLError(
+                    "Search API did not become "
+                    "available within the wake window"
+                )
+
+            search_attempt += 1
+
             log(
-                f"[SEARCH] API attempt "
-                f"{attempt + 1}/{MAX_RETRIES + 1}: "
-                f"{SEARCH_API}"
+                "[SEARCH] Search API attempt "
+                f"{search_attempt}: {SEARCH_API}"
             )
 
             request = urllib.request.Request(
@@ -184,26 +361,31 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             )
 
             try:
+                timeout = min(
+                    API_TIMEOUT,
+                    max(1, int(remaining))
+                )
+
                 with urllib.request.urlopen(
                     request,
-                    timeout=API_TIMEOUT
+                    timeout=timeout
                 ) as response:
 
                     response_body = response.read()
 
                     log(
-                        f"[SEARCH] API response: "
+                        "[SEARCH] API response: "
                         f"status={response.status}, "
                         f"reason={response.reason}"
                     )
 
                     log(
-                        f"[SEARCH] API response headers: "
+                        "[SEARCH] API response headers: "
                         f"{dict(response.headers)}"
                     )
 
                     log(
-                        f"[SEARCH] API response body bytes: "
+                        "[SEARCH] API response body bytes: "
                         f"{len(response_body)}"
                     )
 
@@ -219,40 +401,79 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             except urllib.error.HTTPError as error:
 
-                if error.code != 429:
+                # These are treated as transient because
+                # they can occur while Render is waking
+                # or routing the Free service.
+
+                transient_statuses = (
+                    429,
+                    502,
+                    503,
+                    504,
+                )
+
+                if error.code not in transient_statuses:
                     raise
 
                 log(
-                    f"[SEARCH] API returned 429 "
-                    f"on attempt {attempt + 1}"
-                )
-
-                retry_after = self.get_retry_after(
-                    error
+                    "[SEARCH] Transient API HTTP error: "
+                    f"status={error.code}, "
+                    f"attempt={search_attempt}"
                 )
 
                 self.log_http_error(error)
 
-                if attempt >= MAX_RETRIES:
+                remaining = (
+                    deadline - time.monotonic()
+                )
+
+                if remaining <= 0:
                     log(
-                        "[SEARCH] 429 retry limit reached. "
-                        "No more attempts."
+                        "[SEARCH] No time remaining "
+                        "for another search attempt"
                     )
+
                     raise
 
-                delay = retry_after
-
-                if delay is None:
-                    delay = 1
-
-                delay = max(
-                    0,
-                    min(delay, MAX_RETRY_DELAY)
+                delay = min(
+                    SEARCH_RETRY_DELAY,
+                    remaining
                 )
 
                 log(
-                    f"[SEARCH] Waiting {delay} seconds "
-                    f"before one controlled retry"
+                    "[SEARCH] API is still becoming "
+                    "available. Waiting "
+                    f"{delay:.1f} seconds before retry"
+                )
+
+                time.sleep(delay)
+
+            except (
+                urllib.error.URLError,
+                TimeoutError
+            ) as error:
+
+                log(
+                    "[SEARCH] Transient search "
+                    f"connection error: {error}"
+                )
+
+                remaining = (
+                    deadline - time.monotonic()
+                )
+
+                if remaining <= 0:
+                    raise
+
+                delay = min(
+                    SEARCH_RETRY_DELAY,
+                    remaining
+                )
+
+                log(
+                    "[SEARCH] Waiting "
+                    f"{delay:.1f} seconds before "
+                    "another search attempt"
                 )
 
                 time.sleep(delay)
@@ -261,39 +482,13 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             "Search API request failed"
         )
 
-    def get_retry_after(self, error):
-        try:
-            value = error.headers.get("Retry-After")
-
-            if value is None:
-                log(
-                    "[SEARCH] No Retry-After header "
-                    "was provided"
-                )
-                return None
-
-            value = value.strip()
-
-            log(
-                f"[SEARCH] Retry-After header: "
-                f"{value!r}"
-            )
-
-            return int(value)
-
-        except (ValueError, TypeError):
-            log(
-                "[SEARCH] Retry-After was not a "
-                "numeric delay"
-            )
-            return None
-
     def log_http_error(self, error):
         try:
             log(
-                f"[SEARCH] Upstream HTTP error headers: "
+                "[SEARCH] Upstream HTTP error headers: "
                 f"{dict(error.headers)}"
             )
+
         except Exception:
             log(
                 "[SEARCH] Could not read "
@@ -320,23 +515,33 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
     def send_redirect_home(self):
         try:
             self.send_response(302)
+
             self.send_header(
                 "Location",
                 "/"
             )
+
             self.send_header(
                 "Connection",
                 "close"
             )
+
             self.end_headers()
 
-        except (BrokenPipeError, ConnectionResetError):
+        except (
+            BrokenPipeError,
+            ConnectionResetError
+        ):
             pass
 
         finally:
             self.close_connection = True
 
-    def send_html_response(self, status_code, page):
+    def send_html_response(
+        self,
+        status_code,
+        page
+    ):
         body = page.encode("utf-8")
 
         try:
@@ -366,7 +571,10 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             self.wfile.write(body)
 
-        except (BrokenPipeError, ConnectionResetError):
+        except (
+            BrokenPipeError,
+            ConnectionResetError
+        ):
             pass
 
         finally:
@@ -385,22 +593,29 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, initial-scale=1.0">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
 
     <title>Search Error — Our Search</title>
 
-    <link rel="stylesheet"
-          href="/style.css">
+    <link
+        rel="stylesheet"
+        href="/style.css"
+    >
 </head>
 
 <body class="search-page">
 
     <header class="search-header">
 
-        <a href="/"
-           class="search-logo"
-           aria-label="Our Search home">
+        <a
+            href="/"
+            class="search-logo"
+            aria-label="Our Search home"
+        >
             Our Search
         </a>
 
@@ -456,7 +671,11 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             body
         )
 
-    def render_results(self, query, results):
+    def render_results(
+        self,
+        query,
+        results
+    ):
         safe_query = html.escape(
             query
         )
@@ -464,7 +683,11 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         result_cards = []
 
         for result in results:
-            if not isinstance(result, dict):
+
+            if not isinstance(
+                result,
+                dict
+            ):
                 continue
 
             title = str(
@@ -530,20 +753,25 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             results_html = "\n".join(
                 result_cards
             )
+
         else:
             results_html = """
                 <div class="search-no-results">
+
                     <h2>No results found</h2>
+
                     <p>
                         Our Search could not find
                         matching results.
                     </p>
+
                 </div>
             """
 
         return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
+
     <meta charset="UTF-8">
 
     <meta
@@ -560,6 +788,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         rel="stylesheet"
         href="/style.css"
     >
+
 </head>
 
 <body class="search-page">
@@ -635,6 +864,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+
     website_directory = os.path.join(
         os.path.dirname(
             os.path.abspath(__file__)
@@ -679,6 +909,16 @@ if __name__ == "__main__":
     log(
         "[SERVER] Search API: "
         f"{SEARCH_API}"
+    )
+
+    log(
+        "[SERVER] Search API health: "
+        f"{SEARCH_API_HEALTH}"
+    )
+
+    log(
+        "[SERVER] API wake timeout: "
+        f"{WAKE_TIMEOUT} seconds"
     )
 
     try:
