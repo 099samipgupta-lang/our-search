@@ -1,11 +1,15 @@
+from urllib.parse import urlparse
+
 from crawler_system.url_normalizer import URLNormalizer
+from crawler_system.document_identity import DocumentIdentity
 
 
 class URLDeduplicator:
 
     def __init__(
         self,
-        normalizer=None
+        normalizer=None,
+        state_store=None
     ):
 
         self.normalizer = (
@@ -14,6 +18,7 @@ class URLDeduplicator:
             else URLNormalizer()
         )
 
+        self.state_store = state_store
         self.seen = set()
 
     def normalize(self, url):
@@ -34,6 +39,26 @@ class URLDeduplicator:
         if normalized in self.seen:
             return False
 
+        if self.state_store is not None:
+
+            parsed = urlparse(
+                normalized
+            )
+
+            host = parsed.netloc.lower()
+
+            document_id = (
+                DocumentIdentity.from_normalized_url(
+                    normalized
+                )
+            )
+
+            self.state_store.add_discovered(
+                url=normalized,
+                document_id=document_id,
+                host=host
+            )
+
         self.seen.add(
             normalized
         )
@@ -51,4 +76,6 @@ class URLDeduplicator:
         if not state:
             return
 
-        self.seen = set(state)
+        self.seen = set(
+            state
+        )

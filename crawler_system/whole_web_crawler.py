@@ -12,6 +12,8 @@ from crawler_system.sitemap import SitemapDiscovery
 from crawler_system.storage import CrawlStorage
 from crawler_system.frontier import CrawlFrontier
 from crawler_system.state_storage import CrawlerStateStorage
+from crawler_system.url_state import URLStateStore
+
 from indexing_pipeline.crawler_bridge import CrawlerIndexBridge
 from indexing_pipeline.remote_bridge import RemoteCrawlerIndexBridge
 from indexing_pipeline.automatic import AutomaticCrawlerIndexer
@@ -31,8 +33,21 @@ class WholeWebCrawler:
 
         self.normalizer = URLNormalizer()
 
+        # ---------------------------------------------------------
+        # Durable SQLite URL state
+        # ---------------------------------------------------------
+
+        url_state_path = (
+            f"{storage_root.rstrip('/')}/url_state.db"
+        )
+
+        self.url_state = URLStateStore(
+            database_path=url_state_path
+        )
+
         self.url_dedup = URLDeduplicator(
-            self.normalizer
+            normalizer=self.normalizer,
+            state_store=self.url_state
         )
 
         self.content_dedup = (
@@ -52,6 +67,13 @@ class WholeWebCrawler:
         self.storage = CrawlStorage(
             root=storage_root
         )
+
+        # ---------------------------------------------------------
+        # Existing legacy crawler state
+        #
+        # Kept for content/change compatibility while SQLite
+        # becomes the durable URL-state foundation.
+        # ---------------------------------------------------------
 
         self.state_storage = CrawlerStateStorage(
             storage_root
@@ -80,6 +102,10 @@ class WholeWebCrawler:
             )
         )
 
+        # ---------------------------------------------------------
+        # Frontier
+        # ---------------------------------------------------------
+
         frontier_storage_path = (
             f"{storage_root.rstrip('/')}/frontier/state.json"
         )
@@ -90,6 +116,10 @@ class WholeWebCrawler:
             storage_path=frontier_storage_path
         )
 
+        # ---------------------------------------------------------
+        # Worker coordinator
+        # ---------------------------------------------------------
+
         self.coordinator = WorkerCoordinator(
             self.frontier,
             worker_count=worker_count,
@@ -97,15 +127,26 @@ class WholeWebCrawler:
             max_attempts=max_attempts
         )
 
+        # ---------------------------------------------------------
+        # Index integration
+        # ---------------------------------------------------------
+
         if index_url is None:
+
             index_bridge = CrawlerIndexBridge()
+
         else:
-            index_bridge = RemoteCrawlerIndexBridge(
-                index_url
+
+            index_bridge = (
+                RemoteCrawlerIndexBridge(
+                    index_url
+                )
             )
 
-        self.index_integration = AutomaticCrawlerIndexer(
-            index_bridge
+        self.index_integration = (
+            AutomaticCrawlerIndexer(
+                index_bridge
+            )
         )
 
         self.seeds = set()
@@ -164,13 +205,21 @@ class WholeWebCrawler:
         if normalized is None:
             return False
 
-        self.stats["discovered"] += 1
+        self.stats[
+            "discovered"
+        ] += 1
+
+        # ---------------------------------------------------------
+        # SQLite-backed URL deduplication
+        # ---------------------------------------------------------
 
         if not self.url_dedup.is_new(
             normalized
         ):
 
-            self.stats["duplicates"] += 1
+            self.stats[
+                "duplicates"
+            ] += 1
 
             return False
 
@@ -186,6 +235,11 @@ class WholeWebCrawler:
         )
 
         if added:
+
+            # Move SQLite state from discovered -> queued.
+            self.url_state.mark_queued(
+                normalized
+            )
 
             self.stats[
                 "accepted_urls"
@@ -219,6 +273,7 @@ class WholeWebCrawler:
         )
 
         if not (200 <= status < 300):
+
             self.stats[
                 "pages_failed"
             ] += 1
@@ -239,11 +294,14 @@ class WholeWebCrawler:
         )
 
         if 200 <= status < 300 and body:
+
             self.change_tracker.register(
                 url,
                 body,
                 status=status,
-                etag=response.get("etag"),
+                etag=response.get(
+                    "etag"
+                ),
                 last_modified=response.get(
                     "last_modified"
                 ),
@@ -252,25 +310,33 @@ class WholeWebCrawler:
                 )
             )
 
-        content_info = self.content_dedup.inspect(
-            body,
-            content_type
+        content_info = (
+            self.content_dedup.inspect(
+                body,
+                content_type
+            )
         )
 
         exact_duplicate = (
-            content_info["exact_duplicate_of"]
+            content_info[
+                "exact_duplicate_of"
+            ]
             is not None
         )
 
         if exact_duplicate:
+
             self.stats[
                 "exact_duplicates"
             ] += 1
 
         if (
-            content_info["possible_duplicate_of"]
+            content_info[
+                "possible_duplicate_of"
+            ]
             is not None
         ):
+
             self.stats[
                 "possible_duplicates"
             ] += 1
@@ -282,16 +348,19 @@ class WholeWebCrawler:
         )
 
         if state == "NEW":
+
             self.stats[
                 "new_pages"
             ] += 1
 
         elif state == "CHANGED":
+
             self.stats[
                 "changed_pages"
             ] += 1
 
         elif state == "UNCHANGED":
+
             self.stats[
                 "unchanged_pages"
             ] += 1
@@ -303,6 +372,7 @@ class WholeWebCrawler:
         )
 
         if integration is not None:
+
             integration.process_success(
                 result,
                 state=state,
@@ -312,14 +382,27 @@ class WholeWebCrawler:
                 )
             )
 
+        # ---------------------------------------------------------
+        # Successful crawl -> durable SQLite state
+        # ---------------------------------------------------------
+
+        if 200 <= status < 300:
+
+            self.url_state.mark_crawled(
+                url,
+                status=status
+            )
+
         if "html" in content_type.lower():
 
-            discovered = self.discovery.discover(
-                response.get(
-                    "final_url",
-                    url
-                ),
-                body
+            discovered = (
+                self.discovery.discover(
+                    response.get(
+                        "final_url",
+                        url
+                    ),
+                    body
+                )
             )
 
             for discovered_url in discovered:
@@ -336,11 +419,13 @@ class WholeWebCrawler:
             ] += 1
 
             if integration is not None:
+
                 integration.process_deleted(
                     result.task.document_id
                 )
 
         if 200 <= status < 300:
+
             self.stats[
                 "pages_completed"
             ] += 1
@@ -351,7 +436,9 @@ class WholeWebCrawler:
 
         for seed in self.seeds:
 
-            parsed = urlparse(seed)
+            parsed = urlparse(
+                seed
+            )
 
             if parsed.netloc:
 
@@ -392,6 +479,7 @@ class WholeWebCrawler:
     ):
 
         if self.running:
+
             return self.status()
 
         self.running = True
@@ -410,6 +498,7 @@ class WholeWebCrawler:
                 max_cycles is not None
                 and cycles > max_cycles
             ):
+
                 break
 
             self.coordinator.monitor()
@@ -432,6 +521,7 @@ class WholeWebCrawler:
                 self.frontier.size() == 0
                 and not self.coordinator.in_flight
             ):
+
                 break
 
         integration = getattr(
@@ -441,8 +531,11 @@ class WholeWebCrawler:
         )
 
         if integration is not None:
+
             integration.flush()
 
+        # Keep the legacy state save for content
+        # and change-tracking compatibility.
         self.state_storage.save(
             self.url_dedup,
             self.content_dedup,
@@ -461,6 +554,7 @@ class WholeWebCrawler:
     ):
 
         if self.running:
+
             return
 
         self.running = True
@@ -507,9 +601,12 @@ class WholeWebCrawler:
         )
 
         if integration is not None:
+
             integration.close()
 
         self.storage.close()
+
+        self.url_state.close()
 
     def status(self):
 
@@ -521,7 +618,9 @@ class WholeWebCrawler:
 
         return {
             "running": self.running,
+
             "frontier": self.frontier.size(),
+
             "workers": (
                 self.coordinator.worker_count
                 if hasattr(
@@ -530,15 +629,23 @@ class WholeWebCrawler:
                 )
                 else 0
             ),
+
             "in_flight": len(
                 self.coordinator.in_flight
             ),
+
             "coordinator": (
                 self.coordinator.status()
             ),
+
             "stats": dict(
                 self.stats
             ),
+
+            "url_state": (
+                self.url_state.counts()
+            ),
+
             "indexing": (
                 integration.status()
                 if integration is not None
