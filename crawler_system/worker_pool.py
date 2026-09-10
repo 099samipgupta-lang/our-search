@@ -116,6 +116,10 @@ class WorkerPool:
 
         self.running = True
 
+        # A stopped multiprocessing queue cannot be reused.
+        # Create a fresh result queue for every new pool lifecycle.
+        self.result_queue = multiprocessing.Queue()
+
         self.task_queues = {}
         self.workers = {}
         self.busy_workers = set()

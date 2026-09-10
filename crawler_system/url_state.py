@@ -296,6 +296,94 @@ class URLStateStore:
             return cursor.rowcount == 1
 
     # ============================================================
+    # DUE URL REACTIVATION
+    # ============================================================
+
+    def list_due_urls(
+        self,
+        now: Optional[float] = None,
+        limit: int = 100
+    ) -> List[Dict[str, Any]]:
+        """
+        Return crawled URLs whose next crawl time has arrived.
+
+        These URLs remain durable in SQLite while they wait.
+        The crawler can periodically move them back to the
+        frontier without treating them as newly discovered URLs.
+        """
+
+        if now is None:
+            now = time.time()
+
+        limit = max(1, int(limit))
+
+        with self._lock:
+            rows = self._connection.execute(
+                """
+                SELECT *
+                FROM urls
+                WHERE state = 'crawled'
+                  AND next_crawl_at IS NOT NULL
+                  AND next_crawl_at <= ?
+                ORDER BY
+                    priority DESC,
+                    next_crawl_at ASC
+                LIMIT ?
+                """,
+                (
+                    float(now),
+                    limit,
+                )
+            ).fetchall()
+
+            return [dict(row) for row in rows]
+
+    # ============================================================
+    # DUE URL REACTIVATION
+    # ============================================================
+
+    def reactivate_due(
+        self,
+        url: str,
+        now: Optional[float] = None
+    ) -> bool:
+        """
+        Reactivate one crawled URL whose recrawl time has arrived.
+
+        This is intentionally different from add_discovered():
+        the URL already exists and must not be treated as a new
+        discovery.
+        """
+
+        if now is None:
+            now = time.time()
+
+        with self._lock:
+
+            cursor = self._connection.execute(
+                """
+                UPDATE urls
+                SET
+                    state = 'queued',
+                    lease_owner = NULL,
+                    leased_at = NULL,
+                    last_error = NULL
+                WHERE url = ?
+                  AND state = 'crawled'
+                  AND next_crawl_at IS NOT NULL
+                  AND next_crawl_at <= ?
+                """,
+                (
+                    url,
+                    float(now),
+                )
+            )
+
+            self._connection.commit()
+
+            return cursor.rowcount == 1
+
+    # ============================================================
     # URL READ
     # ============================================================
 

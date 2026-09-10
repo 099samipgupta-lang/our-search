@@ -1,9 +1,13 @@
 import time
+
+from urllib.parse import urljoin
+
 from urllib.request import (
     Request,
     build_opener,
     HTTPRedirectHandler
 )
+
 from urllib.error import (
     HTTPError,
     URLError
@@ -57,9 +61,15 @@ class Fetcher:
     ):
 
         self.user_agent = user_agent
-        self.max_redirects = max_redirects
-        self.max_retries = max_retries
-        self.backoff_base = backoff_base
+        self.max_redirects = (
+            int(max_redirects)
+        )
+        self.max_retries = (
+            int(max_retries)
+        )
+        self.backoff_base = (
+            float(backoff_base)
+        )
 
         self.opener = build_opener(
             NoRedirectHandler()
@@ -113,7 +123,25 @@ class Fetcher:
             )
         )
 
-        time.sleep(delay)
+        time.sleep(
+            delay
+        )
+
+    @staticmethod
+    def _validator_values(
+        headers
+    ):
+
+        return {
+            "etag":
+                headers.get(
+                    "ETag"
+                ),
+            "last_modified":
+                headers.get(
+                    "Last-Modified"
+                )
+        }
 
     def _result(
         self,
@@ -127,6 +155,12 @@ class Fetcher:
         body,
         retries
     ):
+
+        validators = (
+            self._validator_values(
+                headers
+            )
+        )
 
         return {
             "url": url,
@@ -146,7 +180,13 @@ class Fetcher:
             "final_url":
                 url,
             "retries":
-                retries
+                retries,
+            "etag":
+                validators["etag"],
+            "last_modified":
+                validators[
+                    "last_modified"
+                ]
         }
 
     def fetch(
@@ -163,7 +203,6 @@ class Fetcher:
         visited_redirects = set()
 
         retries = 0
-
         redirects = 0
 
         while True:
@@ -186,12 +225,30 @@ class Fetcher:
                 current_url
             )
 
+            # Validators belong to the
+            # originally requested resource.
+            #
+            # Do not blindly send them to
+            # a redirected URL, especially
+            # if the redirect crosses hosts.
+            request_etag = (
+                etag
+                if current_url == url
+                else None
+            )
+
+            request_last_modified = (
+                last_modified
+                if current_url == url
+                else None
+            )
+
             try:
 
                 response = self._request(
                     current_url,
-                    etag,
-                    last_modified
+                    request_etag,
+                    request_last_modified
                 )
 
                 status = response.status
@@ -243,6 +300,23 @@ class Fetcher:
                         "Location"
                     )
                 )
+
+                # 304 is returned by urllib as
+                # HTTPError. It is nevertheless
+                # a successful conditional fetch.
+                if status == 304:
+
+                    return self._result(
+                        current_url,
+                        url,
+                        redirect_chain,
+                        status,
+                        "not_modified",
+                        content_type,
+                        headers,
+                        b"",
+                        retries
+                    )
 
                 if status in REDIRECT_STATUSES:
 
@@ -302,8 +376,7 @@ class Fetcher:
 
                 if (
                     status in RETRY_STATUSES
-                    and retries
-                    < self.max_retries
+                    and retries < self.max_retries
                 ):
 
                     retries += 1
@@ -383,6 +456,8 @@ class Fetcher:
                         current_url,
                     "retries":
                         retries,
+                    "etag": None,
+                    "last_modified": None,
                     "error":
                         str(error)
                 }
@@ -406,6 +481,8 @@ class Fetcher:
                         current_url,
                     "retries":
                         retries,
+                    "etag": None,
+                    "last_modified": None,
                     "error":
                         str(error)
                 }
@@ -416,23 +493,23 @@ class Fetcher:
         location
     ):
 
-        from urllib.parse import urljoin
-
         return urljoin(
             base_url,
             location
         )
 
     @staticmethod
-    def classify_status(status):
-
-        if 200 <= status < 300:
-            return "success"
+    def classify_status(
+        status
+    ):
 
         if status == 304:
             return "not_modified"
 
-        if status in REDIRECT_STATUSES:
+        if 200 <= status < 300:
+            return "success"
+
+        if 300 <= status < 400:
             return "redirect"
 
         if status == 404:
@@ -441,16 +518,10 @@ class Fetcher:
         if status == 410:
             return "gone"
 
-        if status == 429:
-            return "rate_limited"
-
         if 400 <= status < 500:
             return "client_error"
 
         if 500 <= status < 600:
             return "server_error"
-
-        if status == 0:
-            return "network_error"
 
         return "unknown"

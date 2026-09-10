@@ -9,7 +9,6 @@ class CrawlWorker:
         policy,
         worker_id=0
     ):
-
         self.fetcher = fetcher
         self.policy = policy
         self.worker_id = worker_id
@@ -17,17 +16,11 @@ class CrawlWorker:
         self.tasks_processed = 0
         self.tasks_failed = 0
 
-    def process(
-        self,
-        task,
-        previous=None
-    ):
+    def process(self, task):
 
         self.tasks_processed += 1
 
-        if not self.policy.allow(
-            task.url
-        ):
+        if not self.policy.allow(task.url):
 
             self.tasks_failed += 1
 
@@ -35,16 +28,16 @@ class CrawlWorker:
                 "url": task.url,
                 "requested_url": task.url,
                 "status": 0,
-                "status_type":
-                    "robots_denied",
+                "status_type": "robots_denied",
                 "content_type": "",
                 "headers": {},
                 "body": b"",
                 "redirect_chain": [],
                 "final_url": task.url,
                 "storage_path": None,
-                "worker_id":
-                    self.worker_id
+                "worker_id": self.worker_id,
+                "etag": task.etag,
+                "last_modified": task.last_modified
             }
 
             return CrawlResult(
@@ -52,36 +45,16 @@ class CrawlWorker:
                 response
             )
 
-        etag = None
-        last_modified = None
-
-        if previous:
-
-            etag = previous.get(
-                "etag"
-            )
-
-            last_modified = previous.get(
-                "last_modified"
-            )
-
         response = self.fetcher.fetch(
             task.url,
-            etag=etag,
-            last_modified=last_modified
+            etag=task.etag,
+            last_modified=task.last_modified
         )
 
         response["storage_path"] = None
+        response["worker_id"] = self.worker_id
 
-        response["worker_id"] = (
-            self.worker_id
-        )
-
-        if response.get(
-            "status",
-            0
-        ) >= 400:
-
+        if response.get("status", 0) >= 400:
             self.tasks_failed += 1
 
         return CrawlResult(
