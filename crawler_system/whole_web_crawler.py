@@ -113,7 +113,10 @@ class WholeWebCrawler:
         self.frontier = CrawlFrontier(
             default_delay=frontier_delay,
             max_retries=max_attempts,
-            storage_path=frontier_storage_path
+
+        storage_path=frontier_storage_path,
+           state_store=self.url_state
+
         )
 
         # ---------------------------------------------------------
