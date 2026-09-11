@@ -909,6 +909,100 @@ class WholeWebCrawler:
                     ] += 1
 
     # =============================================================
+    # CONTINUOUS NEW-DOMAIN EXPANSION
+    # =============================================================
+
+    def _process_expansion_queue(self, limit=10):
+        """
+        Process durable new-domain expansion candidates.
+
+        Expansion candidates are discovered during normal Web
+        discovery and stored independently from the normal URL
+        frontier.
+
+        This processor turns queued expansion candidates into
+        normal crawl work. If the candidate URL is already active
+        in the frontier, it is treated as successfully expanded
+        rather than being queued a second time.
+
+        Returns the number of expansion candidates consumed.
+        """
+
+        try:
+            limit = max(1, int(limit))
+        except Exception:
+            limit = 10
+
+        processed = 0
+
+        for _ in range(limit):
+
+            candidate = self.expansion_queue.claim_next()
+
+            if candidate is None:
+                break
+
+            hostname = candidate.get(
+                "hostname"
+            )
+
+            first_url = candidate.get(
+                "first_url"
+            )
+
+            try:
+
+                if not hostname or not first_url:
+                    self.expansion_queue.mark_failed(
+                        hostname
+                    )
+                    continue
+
+                added = self._add_url(
+                    first_url,
+                    source="expansion",
+                    depth=0,
+                    seed=False,
+                    source_url=first_url
+                )
+
+                if added:
+                    self.expansion_queue.mark_complete(
+                        hostname
+                    )
+
+                    processed += 1
+                    continue
+
+                # The URL may already be queued, leased, or crawled.
+                # In that case the domain has already entered the
+                # normal crawl system, so the expansion job is done.
+                existing = self.url_state.get(
+                    self.normalizer.normalize(
+                        first_url
+                    )
+                )
+
+                if existing is not None:
+                    self.expansion_queue.mark_complete(
+                        hostname
+                    )
+
+                    processed += 1
+                    continue
+
+                self.expansion_queue.mark_failed(
+                    hostname
+                )
+
+            except Exception:
+                self.expansion_queue.mark_failed(
+                    hostname
+                )
+
+        return processed
+
+    # =============================================================
     # MAIN RUN
     # =============================================================
 
@@ -946,6 +1040,10 @@ class WholeWebCrawler:
                 limit=100
             )
 
+            self._process_expansion_queue(
+                limit=10
+            )
+
             self.coordinator.dispatch()
 
             results = (
@@ -963,6 +1061,8 @@ class WholeWebCrawler:
             if (
                 self.frontier.size() == 0
                 and not self.coordinator.in_flight
+                and self.expansion_queue.count("queued") == 0
+                and self.expansion_queue.count("processing") == 0
             ):
 
                 break
@@ -1014,6 +1114,10 @@ class WholeWebCrawler:
 
             self.reactivate_due_urls(
                 limit=100
+            )
+
+            self._process_expansion_queue(
+                limit=10
             )
 
             self.coordinator.dispatch()

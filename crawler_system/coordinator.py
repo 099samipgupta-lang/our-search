@@ -464,9 +464,51 @@ class WorkerCoordinator:
         if not self.running:
             return
 
+        # Stop workers first. WorkerPool waits briefly for active
+        # workers to finish before terminating any that remain alive.
         self.pool.stop()
 
         self.running = False
+
+        # Any task still present in ``in_flight`` may have left a
+        # durable URL lease behind. Reconcile those leases before
+        # forgetting the coordinator's task state.
+        for lease in list(
+            self.in_flight.values()
+        ):
+
+            task = lease.get(
+                "task"
+            )
+
+            if task is None:
+                continue
+
+            try:
+
+                state_store = getattr(
+                    self.frontier,
+                    "state_store",
+                    None
+                )
+
+                if state_store is not None:
+
+                    state_store.release_lease(
+                        task.url,
+                        retry_at=None,
+                        increment_attempts=False
+                    )
+
+                else:
+
+                    self.frontier.release(
+                        task.url,
+                        priority=task.priority
+                    )
+
+            except Exception:
+                pass
 
         self.in_flight.clear()
 

@@ -325,8 +325,26 @@ class CrawlFrontier:
 
         return True
 
-    def release(self, url, retry_at=None):
+    def release(
+        self,
+        url,
+        retry_at=None,
+        priority=None,
+        available_at=None
+    ):
+        """
+        Release a leased URL back to the frontier.
+
+        ``retry_at`` is the legacy timestamp parameter.
+        ``available_at`` is accepted for compatibility with
+        WorkerCoordinator.
+        """
+
+        if available_at is not None:
+            retry_at = available_at
+
         if self.state_store is not None:
+
             if retry_at is None:
                 retry_at = time.time()
 
@@ -336,7 +354,10 @@ class CrawlFrontier:
                 increment_attempts=False,
             )
 
-            self.leased_entries.pop(url, None)
+            self.leased_entries.pop(
+                url,
+                None
+            )
 
             return result
 
@@ -349,10 +370,16 @@ class CrawlFrontier:
         if retry_at is None:
             retry_at = time.time()
 
+        if priority is not None:
+            entry["priority"] = float(priority)
+
         entry["state"] = "retry"
         entry["available_at"] = float(retry_at)
 
-        self.leased_entries.pop(url, None)
+        self.leased_entries.pop(
+            url,
+            None
+        )
 
         self.sequence += 1
 
