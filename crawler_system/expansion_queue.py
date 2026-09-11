@@ -1,12 +1,14 @@
 import sqlite3
+import time
 from pathlib import Path
 from threading import Lock
 
 
 class ExpansionQueue:
 
-    def __init__(self, database_path):
+    def __init__(self, database_path, lease_timeout=60.0):
         self.database_path = str(database_path)
+        self.lease_timeout = max(1.0, float(lease_timeout))
         self._lock = Lock()
 
         Path(self.database_path).parent.mkdir(
@@ -21,9 +23,7 @@ class ExpansionQueue:
             self.database_path,
             timeout=30
         )
-
         connection.row_factory = sqlite3.Row
-
         return connection
 
     def _initialize(self):
@@ -39,10 +39,26 @@ class ExpansionQueue:
                         source_hostname TEXT,
                         priority REAL NOT NULL,
                         discovered_at REAL NOT NULL,
-                        status TEXT NOT NULL DEFAULT 'queued'
+                        status TEXT NOT NULL DEFAULT 'queued',
+                        processing_started_at REAL
                     )
                     """
                 )
+
+                columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(expansion_queue)"
+                    ).fetchall()
+                }
+
+                if "processing_started_at" not in columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE expansion_queue
+                        ADD COLUMN processing_started_at REAL
+                        """
+                    )
 
                 connection.execute(
                     """
@@ -52,6 +68,17 @@ class ExpansionQueue:
                         status,
                         priority DESC,
                         discovered_at ASC
+                    )
+                    """
+                )
+
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_expansion_queue_processing
+                    ON expansion_queue(
+                        status,
+                        processing_started_at
                     )
                     """
                 )
@@ -90,14 +117,11 @@ class ExpansionQueue:
             connection = self._connect()
 
             try:
-                connection.execute(
-                    "BEGIN IMMEDIATE"
-                )
+                connection.execute("BEGIN IMMEDIATE")
 
                 existing = connection.execute(
                     """
-                    SELECT
-                        status
+                    SELECT status
                     FROM expansion_queue
                     WHERE hostname = ?
                     """,
@@ -114,9 +138,10 @@ class ExpansionQueue:
                             source_hostname,
                             priority,
                             discovered_at,
-                            status
+                            status,
+                            processing_started_at
                         )
-                        VALUES (?, ?, ?, ?, ?, 'queued')
+                        VALUES (?, ?, ?, ?, ?, 'queued', NULL)
                         """,
                         (
                             hostname,
@@ -133,8 +158,8 @@ class ExpansionQueue:
 
                 # A failed expansion can be safely retried.
                 #
-                # This keeps the same durable queue row instead
-                # of creating a duplicate hostname.
+                # Keep the same durable queue row and reset
+                # the processing lease.
                 if existing["status"] == "failed":
 
                     cursor = connection.execute(
@@ -145,7 +170,8 @@ class ExpansionQueue:
                             source_hostname = ?,
                             priority = ?,
                             discovered_at = ?,
-                            status = 'queued'
+                            status = 'queued',
+                            processing_started_at = NULL
                         WHERE hostname = ?
                           AND status = 'failed'
                         """,
@@ -188,7 +214,8 @@ class ExpansionQueue:
                         source_hostname,
                         priority,
                         discovered_at,
-                        status
+                        status,
+                        processing_started_at
                     FROM expansion_queue
                     WHERE status = 'queued'
                     ORDER BY priority DESC, discovered_at ASC
@@ -209,9 +236,7 @@ class ExpansionQueue:
             connection = self._connect()
 
             try:
-                connection.execute(
-                    "BEGIN IMMEDIATE"
-                )
+                connection.execute("BEGIN IMMEDIATE")
 
                 row = connection.execute(
                     """
@@ -228,15 +253,21 @@ class ExpansionQueue:
                     return None
 
                 hostname = row["hostname"]
+                now = time.time()
 
                 updated = connection.execute(
                     """
                     UPDATE expansion_queue
-                    SET status = 'processing'
+                    SET
+                        status = 'processing',
+                        processing_started_at = ?
                     WHERE hostname = ?
                       AND status = 'queued'
                     """,
-                    (hostname,)
+                    (
+                        now,
+                        hostname
+                    )
                 )
 
                 if updated.rowcount != 1:
@@ -251,7 +282,8 @@ class ExpansionQueue:
                         source_hostname,
                         priority,
                         discovered_at,
-                        status
+                        status,
+                        processing_started_at
                     FROM expansion_queue
                     WHERE hostname = ?
                     """,
@@ -264,6 +296,48 @@ class ExpansionQueue:
                     return None
 
                 return dict(result)
+
+            except Exception:
+                connection.rollback()
+                raise
+
+            finally:
+                connection.close()
+
+    def recover_expired_leases(self, now=None):
+        """
+        Recover expansion candidates whose processing lease
+        has expired.
+
+        Returns the number of recovered candidates.
+        """
+        if now is None:
+            now = time.time()
+
+        cutoff = float(now) - self.lease_timeout
+
+        with self._lock:
+            connection = self._connect()
+
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+
+                cursor = connection.execute(
+                    """
+                    UPDATE expansion_queue
+                    SET
+                        status = 'queued',
+                        processing_started_at = NULL
+                    WHERE status = 'processing'
+                      AND processing_started_at IS NOT NULL
+                      AND processing_started_at <= ?
+                    """,
+                    (cutoff,)
+                )
+
+                connection.commit()
+
+                return cursor.rowcount
 
             except Exception:
                 connection.rollback()
@@ -297,7 +371,9 @@ class ExpansionQueue:
                 cursor = connection.execute(
                     """
                     UPDATE expansion_queue
-                    SET status = ?
+                    SET
+                        status = ?,
+                        processing_started_at = NULL
                     WHERE hostname = ?
                     """,
                     (
@@ -319,16 +395,13 @@ class ExpansionQueue:
 
             try:
                 if status is None:
-
                     row = connection.execute(
                         """
                         SELECT COUNT(*)
                         FROM expansion_queue
                         """
                     ).fetchone()
-
                 else:
-
                     row = connection.execute(
                         """
                         SELECT COUNT(*)
