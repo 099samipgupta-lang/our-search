@@ -3,6 +3,7 @@ from urllib.parse import urlparse
 
 from crawler_system.coordinator import WorkerCoordinator
 from crawler_system.discovery import WebDiscovery
+from crawler_system.discovery_control import DiscoveryControl
 from crawler_system.priority import CrawlPriority
 from crawler_system.url_normalizer import URLNormalizer
 from crawler_system.dedup import URLDeduplicator
@@ -58,6 +59,17 @@ class WholeWebCrawler:
 
         self.discovery = WebDiscovery()
 
+        # ---------------------------------------------------------
+        # Discovery Control
+        #
+        # Raw discovered URLs pass through this layer before
+        # entering the durable frontier.
+        # ---------------------------------------------------------
+
+        self.discovery_control = DiscoveryControl(
+            normalizer=self.normalizer
+        )
+
         self.sitemap = SitemapDiscovery()
 
         self.storage = CrawlStorage(
@@ -68,7 +80,7 @@ class WholeWebCrawler:
         # Existing legacy crawler state
         #
         # Kept for content/change compatibility while SQLite
-        # becomes the durable URL-state foundation.
+        # remains the durable URL-state foundation.
         # ---------------------------------------------------------
 
         self.state_storage = CrawlerStateStorage(
@@ -158,7 +170,8 @@ class WholeWebCrawler:
             "possible_duplicates": 0,
             "sitemap_urls": 0,
             "sitemap_added": 0,
-            "storage_errors": 0
+            "storage_errors": 0,
+            "discovery_rejected": 0
         }
 
     # =============================================================
@@ -222,14 +235,31 @@ class WholeWebCrawler:
         seed=False
     ):
 
-        normalized = self.normalizer.normalize(
-            url
+        self.stats["discovered"] += 1
+
+        # ---------------------------------------------------------
+        # Discovery Control
+        #
+        # Raw URLs must pass the control layer before entering the
+        # durable frontier.
+        # ---------------------------------------------------------
+
+        decision = self.discovery_control.evaluate(
+            url,
+            source=source,
+            depth=depth,
+            seed=seed
         )
 
-        if normalized is None:
+        if not decision.accepted:
+
+            self.stats[
+                "discovery_rejected"
+            ] += 1
+
             return False
 
-        self.stats["discovered"] += 1
+        normalized = decision.url
 
         # ---------------------------------------------------------
         # SQLite-backed URL deduplication
@@ -243,11 +273,78 @@ class WholeWebCrawler:
 
             return False
 
+        # ---------------------------------------------------------
+        # Existing centralized crawl priority
+        #
+        # CrawlPriority remains responsible for the base priority.
+        # Discovery intelligence then adjusts that priority so
+        # crawl-space URLs are explored later without completely
+        # discarding legitimate URLs.
+        # ---------------------------------------------------------
+
         priority = self.priority.score(
             source=source,
             depth=depth,
             seed=seed
         )
+
+        # ---------------------------------------------------------
+        # Discovery intelligence priority adjustment
+        #
+        # Seeds keep their full priority.
+        #
+        # For discovered URLs:
+        #
+        # crawl_now   -> normal intelligence-weighted priority
+        # crawl_later -> additional reduction
+        # low_priority -> stronger reduction
+        #
+        # The minimum multiplier prevents legitimate URLs from
+        # becoming effectively impossible to crawl.
+        # ---------------------------------------------------------
+
+        if not seed:
+
+            crawl_score = float(
+                getattr(
+                    decision,
+                    "crawl_score",
+                    100.0
+                )
+            )
+
+            intelligence_multiplier = max(
+                0.25,
+                min(
+                    crawl_score / 100.0,
+                    1.0
+                )
+            )
+
+            priority *= intelligence_multiplier
+
+            crawl_action = getattr(
+                decision,
+                "crawl_action",
+                "crawl_now"
+            )
+
+            if crawl_action == "crawl_later":
+
+                priority *= 0.80
+
+            elif crawl_action == "low_priority":
+
+                priority *= 0.50
+
+        priority = max(
+            1.0,
+            float(priority)
+        )
+
+        # ---------------------------------------------------------
+        # Add to durable frontier
+        # ---------------------------------------------------------
 
         added = self.frontier.add(
             normalized,
@@ -261,7 +358,9 @@ class WholeWebCrawler:
                 normalized
             )
 
-            self.stats["accepted_urls"] += 1
+            self.stats[
+                "accepted_urls"
+            ] += 1
 
         return added
 
@@ -289,67 +388,28 @@ class WholeWebCrawler:
         Calculate the next crawl time.
 
         The crawler does not treat a URL as permanently finished.
-
-        Recrawl policy:
-
-        NEW
-            Crawl again relatively soon so newly discovered pages
-            can be checked again.
-
-        CHANGED
-            Crawl sooner because the page has demonstrated that it
-            changes.
-
-        UNCHANGED
-            Back off because repeated crawling found no change.
-
-        GONE
-            Check periodically because a deleted URL may eventually
-            return.
-
-        Other successful responses
-            Use a moderate interval.
-
-        Failed/server responses
-            Retry later without creating an immediate hot loop.
         """
 
         now = time.time()
-
-        # ---------------------------------------------------------
-        # Successful content
-        # ---------------------------------------------------------
 
         if 200 <= status < 300:
 
             if change_state == "NEW":
                 interval = 24 * 60 * 60
-                # 1 day
 
             elif change_state == "CHANGED":
                 interval = 6 * 60 * 60
-                # 6 hours
 
             elif change_state == "UNCHANGED":
                 interval = 7 * 24 * 60 * 60
-                # 7 days
 
             elif change_state == "GONE":
                 interval = 30 * 24 * 60 * 60
-                # 30 days
 
             else:
                 interval = 24 * 60 * 60
-                # 1 day
 
             return now + interval
-
-        # ---------------------------------------------------------
-        # 304 Not Modified
-        #
-        # Validators proved that the server-side representation has
-        # not changed. Back off more aggressively.
-        # ---------------------------------------------------------
 
         if status == 304:
 
@@ -357,29 +417,17 @@ class WholeWebCrawler:
                 7 * 24 * 60 * 60
             )
 
-        # ---------------------------------------------------------
-        # Permanent deletion
-        # ---------------------------------------------------------
-
         if status == 410:
 
             return now + (
                 30 * 24 * 60 * 60
             )
 
-        # ---------------------------------------------------------
-        # Not found
-        # ---------------------------------------------------------
-
         if status == 404:
 
             return now + (
                 7 * 24 * 60 * 60
             )
-
-        # ---------------------------------------------------------
-        # Rate limiting / temporary server failures
-        # ---------------------------------------------------------
 
         if status in (
             408,
@@ -394,10 +442,6 @@ class WholeWebCrawler:
             return now + (
                 60 * 60
             )
-
-        # ---------------------------------------------------------
-        # Other failures
-        # ---------------------------------------------------------
 
         return now + (
             24 * 60 * 60
@@ -431,14 +475,6 @@ class WholeWebCrawler:
             b""
         )
 
-        # ---------------------------------------------------------
-        # Previous validators
-        #
-        # Keep the values that were attached to the task when the
-        # crawl was dispatched. This prevents validators from being
-        # accidentally lost when a response does not return them.
-        # ---------------------------------------------------------
-
         previous_etag = getattr(
             result.task,
             "etag",
@@ -471,13 +507,6 @@ class WholeWebCrawler:
             else previous_last_modified
         )
 
-        # ---------------------------------------------------------
-        # HTTP success classification
-        #
-        # 304 is a successful crawl result even though it has no
-        # response body.
-        # ---------------------------------------------------------
-
         successful = (
             200 <= status < 300
             or status == 304
@@ -488,15 +517,6 @@ class WholeWebCrawler:
             self.stats[
                 "pages_failed"
             ] += 1
-
-        # ---------------------------------------------------------
-        # Change tracking
-        #
-        # IMPORTANT:
-        # Pass status into ChangeTracker.
-        #
-        # This allows 304 / 404 / 410 to be interpreted correctly.
-        # ---------------------------------------------------------
 
         state_info = self.change_tracker.check(
             url,
@@ -511,15 +531,6 @@ class WholeWebCrawler:
 
         # ---------------------------------------------------------
         # 304 Not Modified
-        #
-        # No new body exists. Do NOT:
-        #
-        # - register empty content
-        # - create an empty content fingerprint
-        # - replace indexed content
-        # - rediscover links from an empty body
-        #
-        # The existing indexed representation remains valid.
         # ---------------------------------------------------------
 
         if status == 304:
@@ -569,8 +580,6 @@ class WholeWebCrawler:
 
         # ---------------------------------------------------------
         # Content deduplication
-        #
-        # Only inspect/register actual response bodies.
         # ---------------------------------------------------------
 
         content_info = None
@@ -605,8 +614,7 @@ class WholeWebCrawler:
             if (
                 content_info[
                     "possible_duplicate_of"
-                ]
-                is not None
+                ] is not None
             ):
 
                 self.stats[
@@ -668,8 +676,6 @@ class WholeWebCrawler:
 
         # ---------------------------------------------------------
         # Successful crawl -> durable SQLite state
-        #
-        # Validators and next_crawl_at are now persisted.
         # ---------------------------------------------------------
 
         if successful:
@@ -689,8 +695,6 @@ class WholeWebCrawler:
 
         # ---------------------------------------------------------
         # HTML discovery
-        #
-        # Only discover links from an actual HTML response body.
         # ---------------------------------------------------------
 
         if (
@@ -735,9 +739,6 @@ class WholeWebCrawler:
                     result.task.document_id
                 )
 
-            # Persist the deletion check and schedule a future
-            # recheck. A URL being gone today does not necessarily
-            # mean it will be gone forever.
             self.url_state.mark_crawled(
                 url,
                 status=status,
@@ -776,7 +777,7 @@ class WholeWebCrawler:
             if parsed.netloc:
 
                 domains.add(
-                    parsed.netloc.lower()
+                    parsed.netloc
                 )
 
         for domain in domains:
@@ -839,8 +840,10 @@ class WholeWebCrawler:
                 break
 
             self.coordinator.monitor()
-            # Reactivate URLs whose durable recrawl time has arrived.
-            self.reactivate_due_urls(limit=100)
+
+            self.reactivate_due_urls(
+                limit=100
+            )
 
             self.coordinator.dispatch()
 
@@ -873,8 +876,6 @@ class WholeWebCrawler:
 
             integration.flush()
 
-        # Keep the legacy state save for content
-        # and change-tracking compatibility.
         self.state_storage.save(
             self.url_dedup,
             self.content_dedup,
@@ -909,8 +910,10 @@ class WholeWebCrawler:
         while self.running:
 
             self.coordinator.monitor()
-            # Reactivate URLs whose durable recrawl time has arrived.
-            self.reactivate_due_urls(limit=100)
+
+            self.reactivate_due_urls(
+                limit=100
+            )
 
             self.coordinator.dispatch()
 
