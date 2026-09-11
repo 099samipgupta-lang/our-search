@@ -4,6 +4,10 @@ from urllib.parse import urlparse
 from crawler_system.coordinator import WorkerCoordinator
 from crawler_system.discovery import WebDiscovery
 from crawler_system.discovery_control import DiscoveryControl
+from crawler_system.domain_expansion import DomainExpansionDetector
+from crawler_system.expansion_store import ExpansionCandidateStore
+from crawler_system.expansion_priority import ExpansionPriority
+from crawler_system.expansion_queue import ExpansionQueue
 from crawler_system.priority import CrawlPriority
 from crawler_system.url_normalizer import URLNormalizer
 from crawler_system.dedup import URLDeduplicator
@@ -68,6 +72,34 @@ class WholeWebCrawler:
 
         self.discovery_control = DiscoveryControl(
             normalizer=self.normalizer
+        )
+
+        # ---------------------------------------------------------
+        # Web Expansion — Domain Detection
+        #
+        # Records newly encountered hostnames during discovery.
+        # This layer observes expansion territory only; it does
+        # not alter crawl decisions yet.
+        # ---------------------------------------------------------
+
+        self.domain_expansion = DomainExpansionDetector()
+
+        # ---------------------------------------------------------
+        # Durable Web Expansion pipeline
+        # ---------------------------------------------------------
+
+        expansion_database_path = (
+            f"{storage_root.rstrip('/')}/expansion.db"
+        )
+
+        self.expansion_store = ExpansionCandidateStore(
+            database_path=expansion_database_path
+        )
+
+        self.expansion_priority = ExpansionPriority()
+
+        self.expansion_queue = ExpansionQueue(
+            database_path=expansion_database_path
         )
 
         self.sitemap = SitemapDiscovery()
@@ -171,7 +203,10 @@ class WholeWebCrawler:
             "sitemap_urls": 0,
             "sitemap_added": 0,
             "storage_errors": 0,
-            "discovery_rejected": 0
+            "discovery_rejected": 0,
+            "new_domains": 0,
+            "expansion_candidates": 0,
+            "expansion_queued": 0
         }
 
     # =============================================================
@@ -232,7 +267,8 @@ class WholeWebCrawler:
         url,
         source="discovery",
         depth=0,
-        seed=False
+        seed=False,
+        source_url=None
     ):
 
         self.stats["discovered"] += 1
@@ -260,6 +296,67 @@ class WholeWebCrawler:
             return False
 
         normalized = decision.url
+
+        # ---------------------------------------------------------
+        # Web Expansion — Domain Detection
+        #
+        # Seeds establish the initial known territory.
+        #
+        # Newly discovered external domains become durable
+        # expansion candidates and enter the expansion queue.
+        # ---------------------------------------------------------
+
+        if seed:
+
+            self.domain_expansion.register(
+                normalized
+            )
+
+        else:
+
+            expansion_event = self.domain_expansion.evaluate(
+                normalized,
+                source_url=source_url
+            )
+
+            if expansion_event is not None:
+
+                self.stats[
+                    "new_domains"
+                ] += 1
+
+                self.expansion_store.add(
+                    expansion_event.url,
+                    source_url=source_url
+                )
+
+                candidate = self.expansion_store.get(
+                    expansion_event.hostname
+                )
+
+                if candidate is not None:
+
+                    self.stats[
+                        "expansion_candidates"
+                    ] += 1
+
+                    expansion_score = (
+                        self.expansion_priority.score(
+                            expansion_event.url,
+                            source_url=source_url,
+                            source=source,
+                            discovery_depth=depth
+                        )
+                    )
+
+                    if self.expansion_queue.enqueue(
+                        candidate,
+                        priority=expansion_score
+                    ):
+
+                        self.stats[
+                            "expansion_queued"
+                        ] += 1
 
         # ---------------------------------------------------------
         # SQLite-backed URL deduplication
@@ -717,7 +814,11 @@ class WholeWebCrawler:
 
                 self._add_url(
                     discovered_url,
-                    source="link"
+                    source="link",
+                    source_url=response.get(
+                        "final_url",
+                        url
+                    )
                 )
 
         # ---------------------------------------------------------
