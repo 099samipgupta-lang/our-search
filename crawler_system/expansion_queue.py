@@ -48,7 +48,11 @@ class ExpansionQueue:
                     """
                     CREATE INDEX IF NOT EXISTS
                     idx_expansion_queue_ready
-                    ON expansion_queue(status, priority DESC, discovered_at ASC)
+                    ON expansion_queue(
+                        status,
+                        priority DESC,
+                        discovered_at ASC
+                    )
                     """
                 )
 
@@ -57,11 +61,7 @@ class ExpansionQueue:
             finally:
                 connection.close()
 
-    def enqueue(
-        self,
-        candidate,
-        priority
-    ):
+    def enqueue(self, candidate, priority):
         if not isinstance(candidate, dict):
             return False
 
@@ -70,6 +70,8 @@ class ExpansionQueue:
 
         if not hostname or not first_url:
             return False
+
+        hostname = hostname.rstrip(".").lower()
 
         source_hostname = candidate.get(
             "source_hostname"
@@ -82,35 +84,93 @@ class ExpansionQueue:
             )
         )
 
+        priority = float(priority)
+
         with self._lock:
             connection = self._connect()
 
             try:
-                cursor = connection.execute(
-                    """
-                    INSERT OR IGNORE INTO expansion_queue
-                    (
-                        hostname,
-                        first_url,
-                        source_hostname,
-                        priority,
-                        discovered_at,
-                        status
-                    )
-                    VALUES (?, ?, ?, ?, ?, 'queued')
-                    """,
-                    (
-                        hostname,
-                        first_url,
-                        source_hostname,
-                        float(priority),
-                        discovered_at
-                    )
+                connection.execute(
+                    "BEGIN IMMEDIATE"
                 )
 
+                existing = connection.execute(
+                    """
+                    SELECT
+                        status
+                    FROM expansion_queue
+                    WHERE hostname = ?
+                    """,
+                    (hostname,)
+                ).fetchone()
+
+                if existing is None:
+
+                    cursor = connection.execute(
+                        """
+                        INSERT INTO expansion_queue (
+                            hostname,
+                            first_url,
+                            source_hostname,
+                            priority,
+                            discovered_at,
+                            status
+                        )
+                        VALUES (?, ?, ?, ?, ?, 'queued')
+                        """,
+                        (
+                            hostname,
+                            first_url,
+                            source_hostname,
+                            priority,
+                            discovered_at
+                        )
+                    )
+
+                    connection.commit()
+
+                    return cursor.rowcount == 1
+
+                # A failed expansion can be safely retried.
+                #
+                # This keeps the same durable queue row instead
+                # of creating a duplicate hostname.
+                if existing["status"] == "failed":
+
+                    cursor = connection.execute(
+                        """
+                        UPDATE expansion_queue
+                        SET
+                            first_url = ?,
+                            source_hostname = ?,
+                            priority = ?,
+                            discovered_at = ?,
+                            status = 'queued'
+                        WHERE hostname = ?
+                          AND status = 'failed'
+                        """,
+                        (
+                            first_url,
+                            source_hostname,
+                            priority,
+                            discovered_at,
+                            hostname
+                        )
+                    )
+
+                    connection.commit()
+
+                    return cursor.rowcount == 1
+
+                # queued / processing / complete entries already
+                # exist, so do not create duplicate work.
                 connection.commit()
 
-                return cursor.rowcount == 1
+                return False
+
+            except Exception:
+                connection.rollback()
+                raise
 
             finally:
                 connection.close()
@@ -149,7 +209,9 @@ class ExpansionQueue:
             connection = self._connect()
 
             try:
-                connection.execute("BEGIN IMMEDIATE")
+                connection.execute(
+                    "BEGIN IMMEDIATE"
+                )
 
                 row = connection.execute(
                     """
@@ -257,13 +319,16 @@ class ExpansionQueue:
 
             try:
                 if status is None:
+
                     row = connection.execute(
                         """
                         SELECT COUNT(*)
                         FROM expansion_queue
                         """
                     ).fetchone()
+
                 else:
+
                     row = connection.execute(
                         """
                         SELECT COUNT(*)
