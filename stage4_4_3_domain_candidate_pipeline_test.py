@@ -124,12 +124,17 @@ second = DomainCandidate(
 
 check(
     "FIRST CANDIDATE ACCEPTED",
-    deduplicator.is_new(first),
+    deduplicator.is_new(first.hostname),
+)
+
+check(
+    "FIRST CANDIDATE ADDED",
+    deduplicator.add(first.hostname),
 )
 
 check(
     "DUPLICATE HOST REJECTED",
-    not deduplicator.is_new(second),
+    not deduplicator.is_new(second.hostname),
 )
 
 check(
