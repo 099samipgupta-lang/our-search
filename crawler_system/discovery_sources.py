@@ -43,6 +43,7 @@ class DiscoverySourceRegistry:
         # ---------------------------------------------------------
         # Discovery Source Execution Metrics
         # ---------------------------------------------------------
+
         self.execution_metrics: dict[str, dict[str, int]] = {}
 
     def _metrics_for(self, name):
@@ -53,7 +54,45 @@ class DiscoverySourceRegistry:
                 "skipped": 0,
                 "failures": 0,
                 "items_produced": 0,
+                "successful_executions": 0,
+                "empty_results": 0,
             }
+        )
+
+    @staticmethod
+    def _calculate_health(metrics):
+        executions = metrics["executions"]
+        failures = metrics["failures"]
+
+        if executions <= 0:
+            return "healthy"
+
+        failure_rate = failures / executions
+
+        if failure_rate >= 0.50:
+            return "unhealthy"
+
+        if failure_rate >= 0.20:
+            return "degraded"
+
+        return "healthy"
+
+    def _update_health_metrics(self, metrics):
+        executions = metrics["executions"]
+        failures = metrics["failures"]
+
+        if executions > 0:
+            metrics["failure_rate"] = failures / executions
+            metrics["success_rate"] = (
+                metrics["successful_executions"]
+                / executions
+            )
+        else:
+            metrics["failure_rate"] = 0.0
+            metrics["success_rate"] = 0.0
+
+        metrics["health"] = self._calculate_health(
+            metrics
         )
 
     def register(self, source):
@@ -78,7 +117,10 @@ class DiscoverySourceRegistry:
         if not isinstance(name, str):
             return False
 
-        removed = self._sources.pop(name, None) is not None
+        removed = (
+            self._sources.pop(name, None)
+            is not None
+        )
 
         if removed:
             self.execution_metrics.pop(
@@ -131,14 +173,11 @@ class DiscoverySourceRegistry:
                 # -------------------------------------------------
                 # Context-aware filtering
                 #
-                # If content_type is explicitly supplied, use the
-                # source's can_discover() decision.
+                # When content_type is explicitly supplied,
+                # use can_discover().
                 #
-                # If content_type is not supplied, preserve the
-                # original registry behavior and execute the source.
-                #
-                # This keeps older callers compatible while allowing
-                # newer callers to provide precise context.
+                # When content_type is omitted, preserve the
+                # original registry behavior for compatibility.
                 # -------------------------------------------------
 
                 if (
@@ -147,7 +186,14 @@ class DiscoverySourceRegistry:
                 ):
                     if not can_discover(context):
                         metrics["skipped"] += 1
+                        self._update_health_metrics(
+                            metrics
+                        )
                         continue
+
+                # -------------------------------------------------
+                # Source execution
+                # -------------------------------------------------
 
                 metrics["executions"] += 1
 
@@ -158,9 +204,26 @@ class DiscoverySourceRegistry:
 
             except Exception:
                 metrics["failures"] += 1
+
+                self._update_health_metrics(
+                    metrics
+                )
+
                 continue
 
+            # -----------------------------------------------------
+            # Successful execution
+            # -----------------------------------------------------
+
+            metrics["successful_executions"] += 1
+
             if not discovered:
+                metrics["empty_results"] += 1
+
+                self._update_health_metrics(
+                    metrics
+                )
+
                 continue
 
             produced = 0
@@ -175,5 +238,12 @@ class DiscoverySourceRegistry:
                     produced += 1
 
             metrics["items_produced"] += produced
+
+            if produced == 0:
+                metrics["empty_results"] += 1
+
+            self._update_health_metrics(
+                metrics
+            )
 
         return results
