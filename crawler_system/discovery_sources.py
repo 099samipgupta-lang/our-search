@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from time import perf_counter
+from time import perf_counter, monotonic
 from typing import Any, Protocol
 
 
@@ -38,14 +38,45 @@ class DiscoverySource(Protocol):
 
 class DiscoverySourceRegistry:
 
-    def __init__(self):
+    def __init__(
+        self,
+        max_failure_rate: float = 0.50,
+        max_average_latency_seconds: float = 5.0,
+        adaptive_failure_threshold: int = 3,
+        adaptive_latency_threshold: int = 3,
+        adaptive_cooldown_seconds: float = 30.0,
+    ):
         self._sources: dict[str, DiscoverySource] = {}
 
         # ---------------------------------------------------------
-        # Discovery Source Execution Metrics
+        # Discovery Source Metrics
         # ---------------------------------------------------------
 
         self.execution_metrics: dict[str, dict[str, Any]] = {}
+
+        # ---------------------------------------------------------
+        # Adaptive-control configuration
+        # ---------------------------------------------------------
+
+        self.max_failure_rate = max_failure_rate
+        self.max_average_latency_seconds = (
+            max_average_latency_seconds
+        )
+        self.adaptive_failure_threshold = (
+            adaptive_failure_threshold
+        )
+        self.adaptive_latency_threshold = (
+            adaptive_latency_threshold
+        )
+        self.adaptive_cooldown_seconds = (
+            adaptive_cooldown_seconds
+        )
+
+        # ---------------------------------------------------------
+        # Adaptive-control state
+        # ---------------------------------------------------------
+
+        self.adaptive_control: dict[str, dict[str, Any]] = {}
 
     def _metrics_for(self, name):
         return self.execution_metrics.setdefault(
@@ -58,14 +89,25 @@ class DiscoverySourceRegistry:
                 "successful_executions": 0,
                 "empty_results": 0,
 
-                # -------------------------------------------------
                 # Performance / latency observability
-                # -------------------------------------------------
 
                 "total_latency_seconds": 0.0,
                 "average_latency_seconds": 0.0,
                 "min_latency_seconds": None,
                 "max_latency_seconds": None,
+            }
+        )
+
+    def _adaptive_state_for(self, name):
+        return self.adaptive_control.setdefault(
+            name,
+            {
+                "enabled": True,
+                "failure_streak": 0,
+                "latency_streak": 0,
+                "cooldown_until": 0.0,
+                "control_action": "active",
+                "control_reason": None,
             }
         )
 
@@ -106,7 +148,10 @@ class DiscoverySourceRegistry:
         )
 
     @staticmethod
-    def _update_latency_metrics(metrics, latency_seconds):
+    def _update_latency_metrics(
+        metrics,
+        latency_seconds
+    ):
         metrics["total_latency_seconds"] += latency_seconds
 
         executions = metrics["executions"]
@@ -133,6 +178,116 @@ class DiscoverySourceRegistry:
         ):
             metrics["max_latency_seconds"] = latency_seconds
 
+    def _update_adaptive_state_after_success(
+        self,
+        name,
+        latency_seconds,
+    ):
+        state = self._adaptive_state_for(name)
+
+        state["failure_streak"] = 0
+
+        if (
+            latency_seconds
+            > self.max_average_latency_seconds
+        ):
+            state["latency_streak"] += 1
+        else:
+            state["latency_streak"] = 0
+
+        state["enabled"] = True
+        state["cooldown_until"] = 0.0
+        state["control_action"] = "active"
+        state["control_reason"] = None
+
+        if (
+            state["latency_streak"]
+            >= self.adaptive_latency_threshold
+        ):
+            state["enabled"] = False
+            state["cooldown_until"] = (
+                monotonic()
+                + self.adaptive_cooldown_seconds
+            )
+            state["control_action"] = "cooldown"
+            state["control_reason"] = (
+                "persistent_high_latency"
+            )
+
+    def _update_adaptive_state_after_failure(
+        self,
+        name,
+    ):
+        state = self._adaptive_state_for(name)
+
+        state["failure_streak"] += 1
+        state["latency_streak"] = 0
+
+        # ---------------------------------------------------------
+        # A failed recovery probe immediately returns the source
+        # to cooldown. A recovery probe exists specifically to
+        # verify that a previously unhealthy source is safe to
+        # resume.
+        # ---------------------------------------------------------
+
+        if state["control_action"] == "recovery_probe":
+            state["enabled"] = False
+            state["cooldown_until"] = (
+                monotonic()
+                + self.adaptive_cooldown_seconds
+            )
+            state["control_action"] = "cooldown"
+            state["control_reason"] = (
+                "recovery_probe_failed"
+            )
+
+            return
+
+        if (
+            state["failure_streak"]
+            >= self.adaptive_failure_threshold
+        ):
+            state["enabled"] = False
+            state["cooldown_until"] = (
+                monotonic()
+                + self.adaptive_cooldown_seconds
+            )
+            state["control_action"] = "cooldown"
+            state["control_reason"] = (
+                "persistent_failures"
+            )
+
+    def _adaptive_should_execute(self, name):
+        state = self._adaptive_state_for(name)
+
+        if state["enabled"]:
+            return True
+
+        now = monotonic()
+
+        if now >= state["cooldown_until"]:
+            # Automatic recovery probe.
+
+            state["enabled"] = True
+            state["failure_streak"] = 0
+            state["latency_streak"] = 0
+            state["control_action"] = "recovery_probe"
+            state["control_reason"] = (
+                "cooldown_expired"
+            )
+
+            return True
+
+        return False
+
+    def get_adaptive_state(self, name):
+        state = self.adaptive_control.get(name)
+
+        if state is None:
+            return None
+
+        return dict(state)
+
     def register(self, source):
         name = getattr(source, "name", None)
 
@@ -149,7 +304,9 @@ class DiscoverySourceRegistry:
             )
 
         self._sources[name] = source
+
         self._metrics_for(name)
+        self._adaptive_state_for(name)
 
     def unregister(self, name):
         if not isinstance(name, str):
@@ -162,6 +319,11 @@ class DiscoverySourceRegistry:
 
         if removed:
             self.execution_metrics.pop(
+                name,
+                None
+            )
+
+            self.adaptive_control.pop(
                 name,
                 None
             )
@@ -201,6 +363,19 @@ class DiscoverySourceRegistry:
 
             metrics = self._metrics_for(name)
 
+            # -----------------------------------------------------
+            # Adaptive source control
+            # -----------------------------------------------------
+
+            if not self._adaptive_should_execute(name):
+                metrics["skipped"] += 1
+
+                self._update_health_metrics(
+                    metrics
+                )
+
+                continue
+
             try:
                 can_discover = getattr(
                     source,
@@ -208,15 +383,7 @@ class DiscoverySourceRegistry:
                     None,
                 )
 
-                # -------------------------------------------------
                 # Context-aware filtering
-                #
-                # When content_type is explicitly supplied,
-                # use can_discover().
-                #
-                # When content_type is omitted, preserve the
-                # original registry behavior for compatibility.
-                # -------------------------------------------------
 
                 if (
                     can_discover is not None
@@ -257,12 +424,9 @@ class DiscoverySourceRegistry:
             except Exception:
                 metrics["failures"] += 1
 
-                # -------------------------------------------------
-                # Failed executions may also have consumed time.
-                #
-                # We intentionally do not measure latency here
-                # because the execution did not complete normally.
-                # -------------------------------------------------
+                self._update_adaptive_state_after_failure(
+                    name
+                )
 
                 self._update_health_metrics(
                     metrics
@@ -275,6 +439,11 @@ class DiscoverySourceRegistry:
             # -----------------------------------------------------
 
             metrics["successful_executions"] += 1
+
+            self._update_adaptive_state_after_success(
+                name,
+                latency_seconds,
+            )
 
             if not discovered:
                 metrics["empty_results"] += 1
