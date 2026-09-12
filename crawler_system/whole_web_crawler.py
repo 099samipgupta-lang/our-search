@@ -7,6 +7,7 @@ from crawler_system.domain_expansion import DomainExpansionDetector
 from crawler_system.expansion_store import ExpansionCandidateStore
 from crawler_system.expansion_priority import ExpansionPriority
 from crawler_system.expansion_queue import ExpansionQueue
+from crawler_system.continuous_expansion_controller import ContinuousExpansionController
 from crawler_system.priority import CrawlPriority
 from crawler_system.url_normalizer import URLNormalizer
 from crawler_system.dedup import URLDeduplicator
@@ -123,6 +124,21 @@ class WholeWebCrawler:
 
         self.expansion_queue = ExpansionQueue(
             database_path=expansion_database_path
+        )
+
+        # ---------------------------------------------------------
+        # Continuous Expansion Controller
+        #
+        # Owns expansion lifecycle orchestration while the
+        # existing _process_expansion_queue() remains responsible
+        # for converting candidates into normal crawl work.
+        # ---------------------------------------------------------
+
+        self.expansion_controller = ContinuousExpansionController(
+            expansion_queue=self.expansion_queue,
+            processor=self._process_expansion_queue,
+            batch_size=10,
+            cycle_interval=5.0,
         )
 
         # Sitemap discovery is managed by DiscoverySourceRegistry.
@@ -1138,9 +1154,7 @@ class WholeWebCrawler:
                 limit=100
             )
 
-            self._process_expansion_queue(
-                limit=10
-            )
+            self.expansion_controller.run_cycle()
 
             self.coordinator.dispatch()
 
@@ -1214,9 +1228,7 @@ class WholeWebCrawler:
                 limit=100
             )
 
-            self._process_expansion_queue(
-                limit=10
-            )
+            self.expansion_controller.run_cycle()
 
             self.coordinator.dispatch()
 
@@ -1246,6 +1258,7 @@ class WholeWebCrawler:
     def stop(self):
 
         self.running = False
+        self.expansion_controller.stop()
 
         self.coordinator.stop()
 
@@ -1303,6 +1316,10 @@ class WholeWebCrawler:
 
             "url_state": (
                 self.url_state.counts()
+            ),
+
+            "expansion_controller": (
+                self.expansion_controller.status()
             ),
 
             "indexing": (
