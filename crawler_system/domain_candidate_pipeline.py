@@ -3,8 +3,6 @@ from urllib.parse import urlsplit
 
 
 class DomainCandidateNormalizer:
-    """Canonicalize domain-discovery candidates."""
-
     @staticmethod
     def normalize_hostname(hostname):
         if not isinstance(hostname, str):
@@ -20,19 +18,20 @@ class DomainCandidateNormalizer:
         if not hostname:
             return None
 
-        # A domain candidate must be a hostname, not a URL.
         if "://" in hostname or "/" in hostname:
             return None
 
         try:
-            hostname = hostname.encode("idna").decode("ascii")
-        except Exception:
+            hostname = hostname.encode(
+                "idna"
+            ).decode("ascii").lower()
+        except (UnicodeError, ValueError):
             return None
 
         return hostname
 
     @classmethod
-    def normalize_url(cls, url, hostname=None):
+    def normalize_url(cls, url, hostname):
         if not isinstance(url, str):
             return None
 
@@ -46,31 +45,25 @@ class DomainCandidateNormalizer:
         except Exception:
             return None
 
-        if parsed.scheme.lower() not in ("http", "https"):
+        if parsed.scheme.lower() not in (
+            "http",
+            "https",
+        ):
+            return None
+
+        parsed_hostname = parsed.hostname
+
+        if not parsed_hostname:
             return None
 
         parsed_hostname = cls.normalize_hostname(
-            parsed.hostname
+            parsed_hostname
         )
 
-        if parsed_hostname is None:
+        if parsed_hostname != hostname:
             return None
 
-        if hostname is not None:
-            normalized_hostname = cls.normalize_hostname(
-                hostname
-            )
-
-            if normalized_hostname is None:
-                return None
-
-            if parsed_hostname != normalized_hostname:
-                return None
-
-        scheme = parsed.scheme.lower()
-
-        # Domain discovery candidates represent the domain root.
-        return f"{scheme}://{parsed_hostname}/"
+        return f"{parsed.scheme.lower()}://{hostname}/"
 
     @classmethod
     def normalize_candidate(cls, candidate):
@@ -86,24 +79,25 @@ class DomainCandidateNormalizer:
 
         url = cls.normalize_url(
             getattr(candidate, "url", None),
-            hostname=hostname,
+            hostname,
         )
 
         if url is None:
             return None
 
-        return replace(
-            candidate,
-            hostname=hostname,
-            url=url,
-        )
+        try:
+            return replace(
+                candidate,
+                hostname=hostname,
+                url=url,
+            )
+        except (TypeError, ValueError):
+            return None
 
 
 class DomainCandidateValidator:
-    """Validate normalized domain-discovery candidates."""
-
     @staticmethod
-    def is_valid_hostname(hostname):
+    def validate_hostname(hostname):
         if not isinstance(hostname, str):
             return False
 
@@ -115,27 +109,30 @@ class DomainCandidateValidator:
 
         labels = hostname.split(".")
 
-        # We require an actual domain-like hostname.
         if len(labels) < 2:
             return False
 
         for label in labels:
-            if not label or len(label) > 63:
+            if not label:
                 return False
 
-            if label.startswith("-") or label.endswith("-"):
+            if len(label) > 63:
                 return False
 
-            if not all(
-                character.isalnum() or character == "-"
-                for character in label
-            ):
+            if label.startswith("-"):
                 return False
 
-        # Avoid treating an IP-like value as a discovered domain.
-        final_label = labels[-1]
+            if label.endswith("-"):
+                return False
 
-        if final_label.isdigit():
+            for character in label:
+                if not (
+                    character.isalnum()
+                    or character == "-"
+                ):
+                    return False
+
+        if labels[-1].isdigit():
             return False
 
         return True
@@ -145,17 +142,18 @@ class DomainCandidateValidator:
         if candidate is None:
             return False
 
-        hostname = getattr(candidate, "hostname", None)
+        hostname = getattr(
+            candidate,
+            "hostname",
+            None,
+        )
+
+        if not cls.validate_hostname(hostname):
+            return False
+
         url = getattr(candidate, "url", None)
-        source = getattr(candidate, "source", None)
 
-        if not cls.is_valid_hostname(hostname):
-            return False
-
-        if not isinstance(url, str) or not url:
-            return False
-
-        if not isinstance(source, str) or not source.strip():
+        if not isinstance(url, str):
             return False
 
         try:
@@ -163,7 +161,10 @@ class DomainCandidateValidator:
         except Exception:
             return False
 
-        if parsed.scheme.lower() not in ("http", "https"):
+        if parsed.scheme.lower() not in (
+            "http",
+            "https",
+        ):
             return False
 
         if parsed.hostname != hostname:
@@ -172,25 +173,39 @@ class DomainCandidateValidator:
         if parsed.path not in ("", "/"):
             return False
 
-        if parsed.query or parsed.fragment:
+        if parsed.query:
+            return False
+
+        if parsed.fragment:
+            return False
+
+        source = getattr(
+            candidate,
+            "source",
+            None,
+        )
+
+        if not isinstance(source, str):
+            return False
+
+        if not source.strip():
             return False
 
         return True
 
 
 class DomainCandidateDeduplicator:
-    """Deduplicate candidates by canonical hostname."""
-
     def __init__(self):
         self._seen = set()
 
-    def is_new(self, candidate):
-        if candidate is None:
+    def is_new(self, hostname):
+        if not isinstance(hostname, str):
             return False
 
-        hostname = getattr(candidate, "hostname", None)
+        return hostname not in self._seen
 
-        if not hostname:
+    def add(self, hostname):
+        if not isinstance(hostname, str):
             return False
 
         if hostname in self._seen:
@@ -199,9 +214,6 @@ class DomainCandidateDeduplicator:
         self._seen.add(hostname)
         return True
 
-    def add(self, candidate):
-        return self.is_new(candidate)
-
     def contains(self, hostname):
         return hostname in self._seen
 
@@ -209,22 +221,37 @@ class DomainCandidateDeduplicator:
         return len(self._seen)
 
     def get_state(self):
-        return sorted(self._seen)
+        return set(self._seen)
 
-    def load_state(self, state):
-        if not state:
+    def load_state(self, values):
+        if values is None:
             return
 
-        self._seen = set(state)
+        self._seen = {
+            value
+            for value in values
+            if isinstance(value, str)
+        }
 
 
 class DomainCandidatePipeline:
     """
-    Normalize, validate, and deduplicate domain candidates.
+    Normalizes, validates, and deduplicates independently
+    discovered domain candidates.
 
-    This component is intentionally independent from the crawler's
-    URLDeduplicator and persistent URL state.
+    When multiple discovery sources report the same hostname,
+    process_many() deterministically selects the strongest
+    candidate instead of depending on set iteration order.
     """
+
+    SOURCE_PRIORITY = {
+        "certificate_transparency": 100,
+        "registry": 90,
+        "public_registry": 90,
+        "feed": 70,
+        "sitemap": 60,
+        "link": 50,
+    }
 
     def __init__(
         self,
@@ -250,6 +277,63 @@ class DomainCandidatePipeline:
             else DomainCandidateDeduplicator()
         )
 
+    @classmethod
+    def _candidate_rank(cls, candidate):
+        source = getattr(
+            candidate,
+            "source",
+            "",
+        )
+
+        source = (
+            source.strip().lower()
+            if isinstance(source, str)
+            else ""
+        )
+
+        source_score = cls.SOURCE_PRIORITY.get(
+            source,
+            0,
+        )
+
+        evidence = getattr(
+            candidate,
+            "evidence",
+            None,
+        )
+
+        evidence_score = (
+            1
+            if isinstance(evidence, str)
+            and evidence.strip()
+            else 0
+        )
+
+        metadata = getattr(
+            candidate,
+            "metadata",
+            None,
+        )
+
+        metadata_score = (
+            1
+            if isinstance(metadata, dict)
+            and metadata
+            else 0
+        )
+
+        # Higher values win.
+        #
+        # Source strength is dominant. Evidence and metadata
+        # are secondary. Source name is a stable final
+        # deterministic tie-breaker.
+        return (
+            source_score,
+            evidence_score,
+            metadata_score,
+            source,
+        )
+
     def process(self, candidate):
         normalized = self.normalizer.normalize_candidate(
             candidate
@@ -258,11 +342,19 @@ class DomainCandidatePipeline:
         if normalized is None:
             return None
 
-        if not self.validator.validate(normalized):
+        if not self.validator.validate(
+            normalized
+        ):
             return None
 
-        if not self.deduplicator.is_new(normalized):
+        if not self.deduplicator.is_new(
+            normalized.hostname
+        ):
             return None
+
+        self.deduplicator.add(
+            normalized.hostname
+        )
 
         return normalized
 
@@ -270,15 +362,61 @@ class DomainCandidatePipeline:
         if candidates is None:
             return set()
 
-        results = set()
+        normalized_candidates = []
 
         for candidate in candidates:
-            processed = self.process(candidate)
+            normalized = (
+                self.normalizer.normalize_candidate(
+                    candidate
+                )
+            )
 
-            if processed is not None:
-                results.add(processed)
+            if normalized is None:
+                continue
 
-        return results
+            if not self.validator.validate(
+                normalized
+            ):
+                continue
+
+            normalized_candidates.append(
+                normalized
+            )
+
+        # Group by normalized hostname so duplicate reports
+        # from different discovery sources can be resolved
+        # deterministically.
+        grouped = {}
+
+        for candidate in normalized_candidates:
+            hostname = candidate.hostname
+
+            existing = grouped.get(hostname)
+
+            if existing is None:
+                grouped[hostname] = candidate
+                continue
+
+            if self._candidate_rank(
+                candidate
+            ) > self._candidate_rank(existing):
+                grouped[hostname] = candidate
+
+        accepted = set()
+
+        # Stable hostname ordering makes processing deterministic.
+        for hostname in sorted(grouped):
+            candidate = grouped[hostname]
+
+            if not self.deduplicator.is_new(
+                hostname
+            ):
+                continue
+
+            self.deduplicator.add(hostname)
+            accepted.add(candidate)
+
+        return accepted
 
     def count(self):
         return self.deduplicator.count()

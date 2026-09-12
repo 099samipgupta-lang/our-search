@@ -5,6 +5,9 @@ from pathlib import Path
 from threading import Lock
 
 from crawler_system.domain_discovery_sources import DomainCandidate
+from crawler_system.domain_candidate_priority import (
+    DomainCandidatePriority,
+)
 from crawler_system.domain_candidate_provenance import (
     DomainCandidateProvenance,
 )
@@ -21,6 +24,7 @@ class DomainCandidateStore:
     def __init__(self, database_path):
         self.database_path = str(database_path)
         self._lock = Lock()
+        self._priority = DomainCandidatePriority()
 
         self._prepare_database_directory()
         self._initialize()
@@ -58,10 +62,26 @@ class DomainCandidateStore:
                         evidence TEXT,
                         discovered_at REAL NOT NULL,
                         metadata_json TEXT,
+                        priority REAL NOT NULL DEFAULT 50.0,
                         status TEXT NOT NULL DEFAULT 'discovered'
                     )
                     """
                 )
+
+                columns = {
+                    row["name"]
+                    for row in connection.execute(
+                        "PRAGMA table_info(domain_candidates)"
+                    ).fetchall()
+                }
+
+                if "priority" not in columns:
+                    connection.execute(
+                        """
+                        ALTER TABLE domain_candidates
+                        ADD COLUMN priority REAL NOT NULL DEFAULT 50.0
+                        """
+                    )
 
                 connection.execute(
                     """
@@ -76,6 +96,14 @@ class DomainCandidateStore:
                     CREATE INDEX IF NOT EXISTS
                     idx_domain_candidates_source
                     ON domain_candidates(source)
+                    """
+                )
+
+                connection.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS
+                    idx_domain_candidates_priority
+                    ON domain_candidates(priority DESC)
                     """
                 )
 
@@ -125,6 +153,12 @@ class DomainCandidateStore:
 
         return metadata
 
+    def _candidate_priority(self, candidate):
+        try:
+            return float(self._priority.score(candidate))
+        except Exception:
+            return 0.0
+
     def add(
         self,
         candidate: DomainCandidate,
@@ -154,6 +188,8 @@ class DomainCandidateStore:
             candidate.metadata
         )
 
+        priority = self._candidate_priority(candidate)
+
         with self._lock:
             connection = self._connect()
 
@@ -168,9 +204,10 @@ class DomainCandidateStore:
                         evidence,
                         discovered_at,
                         metadata_json,
+                        priority,
                         status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, 'discovered')
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'discovered')
                     """,
                     (
                         hostname,
@@ -179,6 +216,7 @@ class DomainCandidateStore:
                         candidate.evidence,
                         float(discovered_at),
                         metadata_json,
+                        priority,
                     ),
                 )
 
@@ -195,6 +233,7 @@ class DomainCandidateStore:
         url,
         provenance: DomainCandidateProvenance,
         status="discovered",
+        priority=None,
     ) -> bool:
         """
         Convenience method for storing a candidate from a
@@ -224,6 +263,25 @@ class DomainCandidateStore:
         if discovered_at is None:
             discovered_at = time.time()
 
+        if priority is None:
+            priority = self._candidate_priority(
+                DomainCandidate(
+                    hostname=hostname,
+                    url=url,
+                    source=provenance.source,
+                    evidence=provenance.evidence,
+                    discovered_at=discovered_at,
+                    metadata=provenance.metadata,
+                )
+            )
+
+        try:
+            priority = float(priority)
+        except (TypeError, ValueError):
+            return False
+
+        priority = max(0.0, min(100.0, priority))
+
         with self._lock:
             connection = self._connect()
 
@@ -238,9 +296,10 @@ class DomainCandidateStore:
                         evidence,
                         discovered_at,
                         metadata_json,
+                        priority,
                         status
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         hostname,
@@ -249,6 +308,7 @@ class DomainCandidateStore:
                         provenance.evidence,
                         float(discovered_at),
                         metadata_json,
+                        priority,
                         status,
                     ),
                 )
@@ -279,6 +339,7 @@ class DomainCandidateStore:
                         evidence,
                         discovered_at,
                         metadata_json,
+                        priority,
                         status
                     FROM domain_candidates
                     WHERE hostname = ?
@@ -322,10 +383,11 @@ class DomainCandidateStore:
                         evidence,
                         discovered_at,
                         metadata_json,
+                        priority,
                         status
                     FROM domain_candidates
                     WHERE status = ?
-                    ORDER BY discovered_at ASC
+                    ORDER BY priority DESC, discovered_at ASC
                     LIMIT ?
                     """,
                     (
@@ -377,6 +439,47 @@ class DomainCandidateStore:
                     """,
                     (
                         status,
+                        hostname,
+                    ),
+                )
+
+                connection.commit()
+
+                return cursor.rowcount == 1
+
+            finally:
+                connection.close()
+
+    def update_priority(
+        self,
+        hostname,
+        priority,
+    ):
+        hostname = self._normalize_hostname(hostname)
+
+        if hostname is None:
+            return False
+
+        try:
+            priority = float(priority)
+        except (TypeError, ValueError):
+            return False
+
+        if priority < 0.0 or priority > 100.0:
+            return False
+
+        with self._lock:
+            connection = self._connect()
+
+            try:
+                cursor = connection.execute(
+                    """
+                    UPDATE domain_candidates
+                    SET priority = ?
+                    WHERE hostname = ?
+                    """,
+                    (
+                        priority,
                         hostname,
                     ),
                 )
