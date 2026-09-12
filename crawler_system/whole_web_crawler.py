@@ -12,8 +12,8 @@ from crawler_system.url_normalizer import URLNormalizer
 from crawler_system.dedup import URLDeduplicator
 from crawler_system.content_dedup import ContentDeduplicator
 from crawler_system.change_tracker import ChangeTracker
-from crawler_system.sitemap import SitemapDiscovery
 from crawler_system.discovery_sources import DiscoverySourceRegistry
+from crawler_system.sitemap_discovery_source import SitemapDiscoverySource
 from crawler_system.link_discovery_source import LinkDiscoverySource
 from crawler_system.feed_discovery_source import FeedDiscoverySource
 from crawler_system.feed_endpoint_discovery_source import FeedEndpointDiscoverySource
@@ -82,6 +82,10 @@ class WholeWebCrawler:
             FeedDiscoverySource()
         )
 
+        self.discovery_sources.register(
+            SitemapDiscoverySource()
+        )
+
         # ---------------------------------------------------------
         # Discovery Control
         #
@@ -121,7 +125,7 @@ class WholeWebCrawler:
             database_path=expansion_database_path
         )
 
-        self.sitemap = SitemapDiscovery()
+        # Sitemap discovery is managed by DiscoverySourceRegistry.
 
         self.storage = CrawlStorage(
             root=storage_root
@@ -960,47 +964,47 @@ class WholeWebCrawler:
     # =============================================================
 
     def _discover_sitemaps(self):
+        """
+        Discover sitemap URLs for the crawler seeds.
+
+        Sitemap discovery is executed through the shared discovery
+        source registry so it receives the same source metrics,
+        latency observability, health tracking, and adaptive control
+        as every other discovery source.
+        """
 
         domains = set()
 
         for seed in self.seeds:
-
-            parsed = urlparse(
-                seed
-            )
+            parsed = urlparse(seed)
 
             if parsed.netloc:
-
-                domains.add(
-                    parsed.netloc
-                )
+                domains.add(parsed.netloc)
 
         for domain in domains:
+            sitemap_url = "https://" + domain
 
-            try:
+            discovered_items = self.discovery_sources.discover(
+                sitemap_url,
+                body=None,
+                content_type=None,
+            )
 
-                urls = self.sitemap.discover(
-                    "https://" + domain
-                )
+            urls = {
+                item.url
+                for item in discovered_items
+                if getattr(item, "source", None) == "sitemap"
+            }
 
-            except Exception:
-
-                continue
-
-            self.stats[
-                "sitemap_urls"
-            ] += len(urls)
+            self.stats["sitemap_urls"] += len(urls)
 
             for url in urls:
-
                 if self._add_url(
                     url,
-                    source="sitemap"
+                    source="sitemap",
+                    source_url=sitemap_url,
                 ):
-
-                    self.stats[
-                        "sitemap_added"
-                    ] += 1
+                    self.stats["sitemap_added"] += 1
 
     # =============================================================
     # CONTINUOUS NEW-DOMAIN EXPANSION

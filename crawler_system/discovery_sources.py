@@ -41,6 +41,7 @@ class DiscoverySourceRegistry:
     def __init__(
         self,
         max_failure_rate: float = 0.50,
+        degraded_failure_rate: float = 0.20,
         max_average_latency_seconds: float = 5.0,
         adaptive_failure_threshold: int = 3,
         adaptive_latency_threshold: int = 3,
@@ -58,7 +59,25 @@ class DiscoverySourceRegistry:
         # Adaptive-control configuration
         # ---------------------------------------------------------
 
+        if not 0.0 <= max_failure_rate <= 1.0:
+            raise ValueError("max_failure_rate must be between 0 and 1")
+
+        if not 0.0 <= degraded_failure_rate <= 1.0:
+            raise ValueError(
+                "degraded_failure_rate must be between 0 and 1"
+            )
+
+        if degraded_failure_rate > max_failure_rate:
+            raise ValueError(
+                "degraded_failure_rate cannot exceed max_failure_rate"
+            )
+
         self.max_failure_rate = max_failure_rate
+        self.degraded_failure_rate = degraded_failure_rate
+
+        # Kept under the existing public name for compatibility.
+        # Adaptive control treats this as the per-execution latency
+        # threshold, not the calculated average.
         self.max_average_latency_seconds = (
             max_average_latency_seconds
         )
@@ -111,8 +130,7 @@ class DiscoverySourceRegistry:
             }
         )
 
-    @staticmethod
-    def _calculate_health(metrics):
+    def _calculate_health(self, metrics):
         executions = metrics["executions"]
         failures = metrics["failures"]
 
@@ -121,10 +139,10 @@ class DiscoverySourceRegistry:
 
         failure_rate = failures / executions
 
-        if failure_rate >= 0.50:
+        if failure_rate >= self.max_failure_rate:
             return "unhealthy"
 
-        if failure_rate >= 0.20:
+        if failure_rate >= self.degraded_failure_rate:
             return "degraded"
 
         return "healthy"
@@ -154,13 +172,17 @@ class DiscoverySourceRegistry:
     ):
         metrics["total_latency_seconds"] += latency_seconds
 
-        executions = metrics["executions"]
+        # Failed executions are intentionally excluded from latency
+        # metrics. Therefore the denominator is the number of
+        # successful executions including the current one.
+        successful_executions = (
+            metrics["successful_executions"] + 1
+        )
 
-        if executions > 0:
-            metrics["average_latency_seconds"] = (
-                metrics["total_latency_seconds"]
-                / executions
-            )
+        metrics["average_latency_seconds"] = (
+            metrics["total_latency_seconds"]
+            / successful_executions
+        )
 
         current_min = metrics["min_latency_seconds"]
 

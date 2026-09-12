@@ -131,6 +131,13 @@ class SitemapDiscovery:
 
         try:
 
+            # Sitemap XML may contain harmless leading whitespace
+            # or a UTF-8 BOM before the XML declaration.
+            if isinstance(body, bytes):
+                body = body.lstrip(b"\xef\xbb\xbf \t\r\n")
+            elif isinstance(body, str):
+                body = body.lstrip("\ufeff \t\r\n")
+
             root = ET.fromstring(
                 body
             )
