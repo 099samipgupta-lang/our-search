@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from time import perf_counter
 from typing import Any, Protocol
 
 
@@ -44,7 +45,7 @@ class DiscoverySourceRegistry:
         # Discovery Source Execution Metrics
         # ---------------------------------------------------------
 
-        self.execution_metrics: dict[str, dict[str, int]] = {}
+        self.execution_metrics: dict[str, dict[str, Any]] = {}
 
     def _metrics_for(self, name):
         return self.execution_metrics.setdefault(
@@ -56,6 +57,15 @@ class DiscoverySourceRegistry:
                 "items_produced": 0,
                 "successful_executions": 0,
                 "empty_results": 0,
+
+                # -------------------------------------------------
+                # Performance / latency observability
+                # -------------------------------------------------
+
+                "total_latency_seconds": 0.0,
+                "average_latency_seconds": 0.0,
+                "min_latency_seconds": None,
+                "max_latency_seconds": None,
             }
         )
 
@@ -94,6 +104,34 @@ class DiscoverySourceRegistry:
         metrics["health"] = self._calculate_health(
             metrics
         )
+
+    @staticmethod
+    def _update_latency_metrics(metrics, latency_seconds):
+        metrics["total_latency_seconds"] += latency_seconds
+
+        executions = metrics["executions"]
+
+        if executions > 0:
+            metrics["average_latency_seconds"] = (
+                metrics["total_latency_seconds"]
+                / executions
+            )
+
+        current_min = metrics["min_latency_seconds"]
+
+        if (
+            current_min is None
+            or latency_seconds < current_min
+        ):
+            metrics["min_latency_seconds"] = latency_seconds
+
+        current_max = metrics["max_latency_seconds"]
+
+        if (
+            current_max is None
+            or latency_seconds > current_max
+        ):
+            metrics["max_latency_seconds"] = latency_seconds
 
     def register(self, source):
         name = getattr(source, "name", None)
@@ -186,9 +224,11 @@ class DiscoverySourceRegistry:
                 ):
                     if not can_discover(context):
                         metrics["skipped"] += 1
+
                         self._update_health_metrics(
                             metrics
                         )
+
                         continue
 
                 # -------------------------------------------------
@@ -197,13 +237,32 @@ class DiscoverySourceRegistry:
 
                 metrics["executions"] += 1
 
+                start_time = perf_counter()
+
                 discovered = source.discover(
                     url,
                     body,
                 )
 
+                latency_seconds = (
+                    perf_counter()
+                    - start_time
+                )
+
+                self._update_latency_metrics(
+                    metrics,
+                    latency_seconds,
+                )
+
             except Exception:
                 metrics["failures"] += 1
+
+                # -------------------------------------------------
+                # Failed executions may also have consumed time.
+                #
+                # We intentionally do not measure latency here
+                # because the execution did not complete normally.
+                # -------------------------------------------------
 
                 self._update_health_metrics(
                     metrics
