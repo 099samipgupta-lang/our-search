@@ -2,7 +2,6 @@ import time
 from urllib.parse import urlparse
 
 from crawler_system.coordinator import WorkerCoordinator
-from crawler_system.discovery import WebDiscovery
 from crawler_system.discovery_control import DiscoveryControl
 from crawler_system.domain_expansion import DomainExpansionDetector
 from crawler_system.expansion_store import ExpansionCandidateStore
@@ -14,6 +13,10 @@ from crawler_system.dedup import URLDeduplicator
 from crawler_system.content_dedup import ContentDeduplicator
 from crawler_system.change_tracker import ChangeTracker
 from crawler_system.sitemap import SitemapDiscovery
+from crawler_system.discovery_sources import DiscoverySourceRegistry
+from crawler_system.link_discovery_source import LinkDiscoverySource
+from crawler_system.feed_discovery_source import FeedDiscoverySource
+from crawler_system.feed_endpoint_discovery_source import FeedEndpointDiscoverySource
 from crawler_system.storage import CrawlStorage
 from crawler_system.frontier import CrawlFrontier
 from crawler_system.state_storage import CrawlerStateStorage
@@ -61,7 +64,23 @@ class WholeWebCrawler:
 
         self.priority = CrawlPriority()
 
-        self.discovery = WebDiscovery()
+        # ---------------------------------------------------------
+        # Multi-source Web discovery
+        # ---------------------------------------------------------
+
+        self.discovery_sources = DiscoverySourceRegistry()
+
+        self.discovery_sources.register(
+            LinkDiscoverySource()
+        )
+
+        self.discovery_sources.register(
+            FeedEndpointDiscoverySource()
+        )
+
+        self.discovery_sources.register(
+            FeedDiscoverySource()
+        )
 
         # ---------------------------------------------------------
         # Discovery Control
@@ -274,6 +293,44 @@ class WholeWebCrawler:
         self.stats["discovered"] += 1
 
         # ---------------------------------------------------------
+        # Discovery Source Attribution
+        #
+        # Track how URLs enter the crawler. This is intentionally
+        # done before discovery control so rejected discoveries are
+        # also attributable to their originating source.
+        # ---------------------------------------------------------
+
+        source_key = (
+            source.strip()
+            if isinstance(source, str) and source.strip()
+            else "unknown"
+        )
+
+        source_stats = self.stats.setdefault(
+            "discovery_sources",
+            {}
+        )
+
+        source_stats[source_key] = (
+            source_stats.get(source_key, 0) + 1
+        )
+
+        source_metrics = self.stats.setdefault(
+            "discovery_source_metrics",
+            {}
+        )
+
+        source_metrics.setdefault(
+            source_key,
+            {
+                "discovered": 0,
+                "accepted": 0,
+                "duplicate": 0,
+                "rejected": 0,
+            }
+        )["discovered"] += 1
+
+        # ---------------------------------------------------------
         # Discovery Control
         #
         # Raw URLs must pass the control layer before entering the
@@ -293,9 +350,41 @@ class WholeWebCrawler:
                 "discovery_rejected"
             ] += 1
 
+            source_metrics = self.stats.setdefault(
+                "discovery_source_metrics",
+                {}
+            )
+
+            metrics = source_metrics.setdefault(
+                source_key,
+                {
+                    "discovered": 0,
+                    "accepted": 0,
+                    "duplicate": 0,
+                    "rejected": 0,
+                }
+            )
+
+            metrics["rejected"] += 1
+
             return False
 
         normalized = decision.url
+
+        source_metrics = self.stats.setdefault(
+            "discovery_source_metrics",
+            {}
+        )
+
+        metrics = source_metrics.setdefault(
+            source_key,
+            {
+                "discovered": 0,
+                "accepted": 0,
+                "duplicate": 0,
+                "rejected": 0,
+            }
+        )
 
         # ---------------------------------------------------------
         # Web Expansion — Domain Detection
@@ -368,7 +457,13 @@ class WholeWebCrawler:
 
             self.stats["duplicates"] += 1
 
+            metrics["duplicate"] += 1
+
             return False
+
+        # A URL is accepted only after discovery control and
+        # URL deduplication both succeed.
+        metrics["accepted"] += 1
 
         # ---------------------------------------------------------
         # Existing centralized crawl priority
@@ -800,25 +895,24 @@ class WholeWebCrawler:
             and "html" in content_type.lower()
         ):
 
-            discovered = (
-                self.discovery.discover(
-                    response.get(
-                        "final_url",
-                        url
-                    ),
-                    body
-                )
+            final_url = response.get(
+                "final_url",
+                url
             )
 
-            for discovered_url in discovered:
+            discovered_items = self.discovery_sources.discover(
+                final_url,
+                body,
+                content_type
+            )
+
+            for item in discovered_items:
 
                 self._add_url(
-                    discovered_url,
-                    source="link",
-                    source_url=response.get(
-                        "final_url",
-                        url
-                    )
+                    item.url,
+                    source=item.source,
+                    source_url=item.source_url or final_url,
+                    depth=item.depth
                 )
 
         # ---------------------------------------------------------
