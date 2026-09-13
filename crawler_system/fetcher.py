@@ -1,16 +1,20 @@
+import ssl
+import threading
 import time
 
-from urllib.parse import urljoin
-
-from urllib.request import (
-    Request,
-    build_opener,
-    HTTPRedirectHandler
+from http.client import (
+    HTTPConnection,
+    HTTPSConnection,
 )
 
 from urllib.error import (
     HTTPError,
-    URLError
+    URLError,
+)
+
+from urllib.parse import (
+    urljoin,
+    urlsplit,
 )
 
 
@@ -19,7 +23,7 @@ REDIRECT_STATUSES = {
     302,
     303,
     307,
-    308
+    308,
 }
 
 
@@ -30,24 +34,194 @@ RETRY_STATUSES = {
     500,
     502,
     503,
-    504
+    504,
 }
 
 
-class NoRedirectHandler(
-    HTTPRedirectHandler
-):
+class _ConnectionPool:
 
-    def redirect_request(
+    def __init__(
         self,
-        req,
-        fp,
-        code,
-        msg,
-        headers,
-        newurl
+        scheme,
+        hostname,
+        port,
+        max_connections,
+        timeout,
+        ssl_context=None,
     ):
-        return None
+
+        self.scheme = scheme
+        self.hostname = hostname
+        self.port = port
+
+        self.max_connections = max(
+            1,
+            int(max_connections),
+        )
+
+        self.timeout = float(timeout)
+        self.ssl_context = ssl_context
+
+        self._available = []
+        self._created = 0
+
+        self._condition = threading.Condition(
+            threading.RLock()
+        )
+
+        self.total_created = 0
+        self.total_reused = 0
+        self.total_discarded = 0
+
+    def _create_connection(self):
+
+        if self.scheme == "https":
+
+            connection = HTTPSConnection(
+                self.hostname,
+                self.port,
+                timeout=self.timeout,
+                context=self.ssl_context,
+            )
+
+        else:
+
+            connection = HTTPConnection(
+                self.hostname,
+                self.port,
+                timeout=self.timeout,
+            )
+
+        self._created += 1
+        self.total_created += 1
+
+        return connection
+
+    def acquire(self):
+
+        with self._condition:
+
+            while True:
+
+                if self._available:
+
+                    connection = (
+                        self._available.pop()
+                    )
+
+                    self.total_reused += 1
+
+                    return connection
+
+                if (
+                    self._created
+                    < self.max_connections
+                ):
+
+                    return self._create_connection()
+
+                self._condition.wait()
+
+    def release(
+        self,
+        connection,
+    ):
+
+        if connection is None:
+            return
+
+        with self._condition:
+
+            if self._created <= 0:
+
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+                return
+
+            self._available.append(
+                connection
+            )
+
+            self._condition.notify()
+
+    def discard(
+        self,
+        connection,
+    ):
+
+        if connection is not None:
+
+            try:
+                connection.close()
+            except Exception:
+                pass
+
+        with self._condition:
+
+            if self._created > 0:
+                self._created -= 1
+
+            self.total_discarded += 1
+
+            self._condition.notify()
+
+    def close(self):
+
+        with self._condition:
+
+            connections = list(
+                self._available
+            )
+
+            self._available.clear()
+
+            self._created = max(
+                0,
+                self._created
+                - len(connections),
+            )
+
+            for connection in connections:
+
+                try:
+                    connection.close()
+                except Exception:
+                    pass
+
+            self._condition.notify_all()
+
+    def stats(self):
+
+        with self._condition:
+
+            return {
+                "scheme":
+                    self.scheme,
+                "hostname":
+                    self.hostname,
+                "port":
+                    self.port,
+                "max_connections":
+                    self.max_connections,
+                "created":
+                    self._created,
+                "available":
+                    len(self._available),
+                "in_use":
+                    (
+                        self._created
+                        - len(self._available)
+                    ),
+                "total_created":
+                    self.total_created,
+                "total_reused":
+                    self.total_reused,
+                "total_discarded":
+                    self.total_discarded,
+            }
 
 
 class Fetcher:
@@ -57,61 +231,315 @@ class Fetcher:
         user_agent="OurSearchBot/1.0",
         max_redirects=10,
         max_retries=3,
-        backoff_base=1.0
+        backoff_base=1.0,
+        timeout=10.0,
+        max_body_bytes=10 * 1024 * 1024,
+        max_connections_per_origin=4,
     ):
 
         self.user_agent = user_agent
-        self.max_redirects = (
-            int(max_redirects)
-        )
-        self.max_retries = (
-            int(max_retries)
-        )
-        self.backoff_base = (
-            float(backoff_base)
+
+        self.max_redirects = int(
+            max_redirects
         )
 
-        self.opener = build_opener(
-            NoRedirectHandler()
+        self.max_retries = int(
+            max_retries
         )
+
+        self.backoff_base = float(
+            backoff_base
+        )
+
+        self.timeout = float(
+            timeout
+        )
+
+        self.max_body_bytes = int(
+            max_body_bytes
+        )
+
+        self.max_connections_per_origin = max(
+            1,
+            int(max_connections_per_origin),
+        )
+
+        self._ssl_context = (
+            ssl.create_default_context()
+        )
+
+        self._pools = {}
+
+        self._pools_lock = threading.RLock()
+
+        self._closed = False
+
+    # ---------------------------------------------------------
+    # Origin handling
+    # ---------------------------------------------------------
+
+    @staticmethod
+    def _origin(url):
+
+        parsed = urlsplit(url)
+
+        scheme = parsed.scheme.lower()
+
+        hostname = parsed.hostname
+
+        if not hostname:
+
+            raise ValueError(
+                f"URL has no hostname: {url}"
+            )
+
+        hostname = hostname.lower()
+
+        if parsed.port is not None:
+
+            port = parsed.port
+
+        elif scheme == "https":
+
+            port = 443
+
+        else:
+
+            port = 80
+
+        return (
+            scheme,
+            hostname,
+            port,
+        )
+
+    def _pool_for_url(
+        self,
+        url,
+    ):
+
+        origin = self._origin(
+            url
+        )
+
+        with self._pools_lock:
+
+            pool = self._pools.get(
+                origin
+            )
+
+            if pool is None:
+
+                pool = _ConnectionPool(
+                    scheme=origin[0],
+                    hostname=origin[1],
+                    port=origin[2],
+                    max_connections=(
+                        self.max_connections_per_origin
+                    ),
+                    timeout=self.timeout,
+                    ssl_context=(
+                        self._ssl_context
+                    ),
+                )
+
+                self._pools[
+                    origin
+                ] = pool
+
+            return pool
+
+    # ---------------------------------------------------------
+    # Transport
+    # ---------------------------------------------------------
 
     def _request(
         self,
         url,
         etag=None,
-        last_modified=None
+        last_modified=None,
     ):
 
-        headers = {
-            "User-Agent":
-                self.user_agent
-        }
+        if self._closed:
 
-        if etag:
+            raise RuntimeError(
+                "Fetcher is closed"
+            )
 
-            headers[
-                "If-None-Match"
-            ] = etag
-
-        if last_modified:
-
-            headers[
-                "If-Modified-Since"
-            ] = last_modified
-
-        request = Request(
-            url,
-            headers=headers
+        parsed = urlsplit(
+            url
         )
 
-        return self.opener.open(
-            request,
-            timeout=10
+        if parsed.scheme not in (
+            "http",
+            "https",
+        ):
+
+            raise ValueError(
+                f"Unsupported URL scheme: "
+                f"{parsed.scheme}"
+            )
+
+        pool = self._pool_for_url(
+            url
         )
+
+        connection = pool.acquire()
+
+        try:
+
+            headers = {
+                "User-Agent":
+                    self.user_agent,
+                "Connection":
+                    "keep-alive",
+            }
+
+            if etag:
+
+                headers[
+                    "If-None-Match"
+                ] = etag
+
+            if last_modified:
+
+                headers[
+                    "If-Modified-Since"
+                ] = last_modified
+
+            path = (
+                parsed.path
+                or "/"
+            )
+
+            if parsed.query:
+
+                path += (
+                    "?"
+                    + parsed.query
+                )
+
+            connection.request(
+                "GET",
+                path,
+                headers=headers,
+            )
+
+            response = (
+                connection.getresponse()
+            )
+
+            return (
+                pool,
+                connection,
+                response,
+            )
+
+        except Exception:
+
+            pool.discard(
+                connection
+            )
+
+            raise
+
+    # ---------------------------------------------------------
+    # Body protection
+    # ---------------------------------------------------------
+
+    def _read_body(
+        self,
+        response,
+    ):
+
+        content_length = (
+            response.getheader(
+                "Content-Length"
+            )
+        )
+
+        if content_length:
+
+            try:
+
+                declared_size = int(
+                    content_length
+                )
+
+            except ValueError:
+
+                declared_size = None
+
+            if (
+                declared_size is not None
+                and declared_size
+                > self.max_body_bytes
+            ):
+
+                return (
+                    None,
+                    True,
+                )
+
+        chunks = []
+
+        total = 0
+
+        while True:
+
+            remaining = (
+                self.max_body_bytes
+                + 1
+                - total
+            )
+
+            if remaining <= 0:
+
+                return (
+                    None,
+                    True,
+                )
+
+            chunk = response.read(
+                min(
+                    64 * 1024,
+                    remaining,
+                )
+            )
+
+            if not chunk:
+                break
+
+            chunks.append(
+                chunk
+            )
+
+            total += len(
+                chunk
+            )
+
+            if (
+                total
+                > self.max_body_bytes
+            ):
+
+                return (
+                    None,
+                    True,
+                )
+
+        return (
+            b"".join(chunks),
+            False,
+        )
+
+    # ---------------------------------------------------------
+    # Retry
+    # ---------------------------------------------------------
 
     def _backoff(
         self,
-        retry_number
+        retry_number,
     ):
 
         delay = (
@@ -127,6 +555,10 @@ class Fetcher:
             delay
         )
 
+    # ---------------------------------------------------------
+    # Result
+    # ---------------------------------------------------------
+
     @staticmethod
     def _validator_values(
         headers
@@ -140,7 +572,7 @@ class Fetcher:
             "last_modified":
                 headers.get(
                     "Last-Modified"
-                )
+                ),
         }
 
     def _result(
@@ -153,7 +585,7 @@ class Fetcher:
         content_type,
         headers,
         body,
-        retries
+        retries,
     ):
 
         validators = (
@@ -163,10 +595,12 @@ class Fetcher:
         )
 
         return {
-            "url": url,
+            "url":
+                url,
             "requested_url":
                 requested_url,
-            "status": status,
+            "status":
+                status,
             "status_type":
                 status_type,
             "content_type":
@@ -182,18 +616,24 @@ class Fetcher:
             "retries":
                 retries,
             "etag":
-                validators["etag"],
+                validators[
+                    "etag"
+                ],
             "last_modified":
                 validators[
                     "last_modified"
-                ]
+                ],
         }
+
+    # ---------------------------------------------------------
+    # Fetch
+    # ---------------------------------------------------------
 
     def fetch(
         self,
         url,
         etag=None,
-        last_modified=None
+        last_modified=None,
     ):
 
         current_url = url
@@ -203,11 +643,14 @@ class Fetcher:
         visited_redirects = set()
 
         retries = 0
+
         redirects = 0
 
         while True:
 
-            if current_url in visited_redirects:
+            if current_url in (
+                visited_redirects
+            ):
 
                 return self._result(
                     current_url,
@@ -218,19 +661,13 @@ class Fetcher:
                     "",
                     {},
                     b"",
-                    retries
+                    retries,
                 )
 
             visited_redirects.add(
                 current_url
             )
 
-            # Validators belong to the
-            # originally requested resource.
-            #
-            # Do not blindly send them to
-            # a redirected URL, especially
-            # if the redirect crosses hosts.
             request_etag = (
                 etag
                 if current_url == url
@@ -243,28 +680,175 @@ class Fetcher:
                 else None
             )
 
+            pool = None
+
+            connection = None
+
+            reusable = False
+
             try:
 
-                response = self._request(
+                (
+                    pool,
+                    connection,
+                    response,
+                ) = self._request(
                     current_url,
                     request_etag,
-                    request_last_modified
+                    request_last_modified,
                 )
 
                 status = response.status
 
                 headers = dict(
-                    response.headers
+                    response.getheaders()
                 )
 
                 content_type = (
-                    response.headers.get(
+                    response.getheader(
                         "Content-Type",
-                        ""
+                        "",
                     )
                 )
 
-                body = response.read()
+                body, oversized = (
+                    self._read_body(
+                        response
+                    )
+                )
+
+                if oversized:
+
+                    pool.discard(
+                        connection
+                    )
+
+                    connection = None
+
+                    return self._result(
+                        current_url,
+                        url,
+                        redirect_chain,
+                        status,
+                        "body_too_large",
+                        content_type,
+                        headers,
+                        b"",
+                        retries,
+                    )
+
+                connection_header = (
+                    response.getheader(
+                        "Connection",
+                        "",
+                    ).lower()
+                )
+
+                if (
+                    connection_header
+                    == "close"
+                ):
+
+                    reusable = False
+
+                else:
+
+                    reusable = True
+
+                if status == 304:
+
+                    return self._result(
+                        current_url,
+                        url,
+                        redirect_chain,
+                        status,
+                        "not_modified",
+                        content_type,
+                        headers,
+                        b"",
+                        retries,
+                    )
+
+                if status in (
+                    REDIRECT_STATUSES
+                ):
+
+                    location = (
+                        headers.get(
+                            "Location"
+                        )
+                    )
+
+                    if not location:
+
+                        return self._result(
+                            current_url,
+                            url,
+                            redirect_chain,
+                            status,
+                            "redirect",
+                            content_type,
+                            headers,
+                            body,
+                            retries,
+                        )
+
+                    redirects += 1
+
+                    if (
+                        redirects
+                        > self.max_redirects
+                    ):
+
+                        return self._result(
+                            current_url,
+                            url,
+                            redirect_chain,
+                            status,
+                            "too_many_redirects",
+                            content_type,
+                            headers,
+                            b"",
+                            retries,
+                        )
+
+                    redirect_url = (
+                        self._absolute_url(
+                            current_url,
+                            location,
+                        )
+                    )
+
+                    redirect_chain.append(
+                        {
+                            "from":
+                                current_url,
+                            "status":
+                                status,
+                            "to":
+                                redirect_url,
+                        }
+                    )
+
+                    current_url = (
+                        redirect_url
+                    )
+
+                    continue
+
+                if (
+                    status in RETRY_STATUSES
+                    and retries
+                    < self.max_retries
+                ):
+
+                    retries += 1
+
+                    self._backoff(
+                        retries
+                    )
+
+                    continue
 
                 return self._result(
                     current_url,
@@ -277,7 +861,7 @@ class Fetcher:
                     content_type,
                     headers,
                     body,
-                    retries
+                    retries,
                 )
 
             except HTTPError as error:
@@ -291,7 +875,7 @@ class Fetcher:
                 content_type = (
                     error.headers.get(
                         "Content-Type",
-                        ""
+                        "",
                     )
                 )
 
@@ -301,9 +885,6 @@ class Fetcher:
                     )
                 )
 
-                # 304 is returned by urllib as
-                # HTTPError. It is nevertheless
-                # a successful conditional fetch.
                 if status == 304:
 
                     return self._result(
@@ -315,10 +896,12 @@ class Fetcher:
                         content_type,
                         headers,
                         b"",
-                        retries
+                        retries,
                     )
 
-                if status in REDIRECT_STATUSES:
+                if status in (
+                    REDIRECT_STATUSES
+                ):
 
                     if not location:
 
@@ -331,12 +914,15 @@ class Fetcher:
                             content_type,
                             headers,
                             b"",
-                            retries
+                            retries,
                         )
 
                     redirects += 1
 
-                    if redirects > self.max_redirects:
+                    if (
+                        redirects
+                        > self.max_redirects
+                    ):
 
                         return self._result(
                             current_url,
@@ -347,13 +933,13 @@ class Fetcher:
                             content_type,
                             headers,
                             b"",
-                            retries
+                            retries,
                         )
 
                     redirect_url = (
                         self._absolute_url(
                             current_url,
-                            location
+                            location,
                         )
                     )
 
@@ -364,7 +950,7 @@ class Fetcher:
                             "status":
                                 status,
                             "to":
-                                redirect_url
+                                redirect_url,
                         }
                     )
 
@@ -376,21 +962,11 @@ class Fetcher:
 
                 if (
                     status in RETRY_STATUSES
-                    and retries < self.max_retries
+                    and retries
+                    < self.max_retries
                 ):
 
                     retries += 1
-
-                    print(
-                        "Retry",
-                        retries,
-                        "/",
-                        self.max_retries,
-                        "- HTTP",
-                        status,
-                        "-",
-                        current_url
-                    )
 
                     self._backoff(
                         retries
@@ -411,27 +987,30 @@ class Fetcher:
                     content_type,
                     headers,
                     body,
-                    retries
+                    retries,
                 )
 
             except (
                 URLError,
                 TimeoutError,
-                ConnectionError
+                ConnectionError,
+                OSError,
             ) as error:
+
+                if (
+                    pool is not None
+                    and connection is not None
+                ):
+
+                    pool.discard(
+                        connection
+                    )
+
+                    connection = None
 
                 if retries < self.max_retries:
 
                     retries += 1
-
-                    print(
-                        "Retry",
-                        retries,
-                        "/",
-                        self.max_retries,
-                        "- network error -",
-                        current_url
-                    )
 
                     self._backoff(
                         retries
@@ -444,58 +1023,150 @@ class Fetcher:
                         current_url,
                     "requested_url":
                         url,
-                    "status": 0,
+                    "status":
+                        0,
                     "status_type":
                         "network_error",
-                    "content_type": "",
-                    "headers": {},
-                    "body": b"",
+                    "content_type":
+                        "",
+                    "headers":
+                        {},
+                    "body":
+                        b"",
                     "redirect_chain":
                         redirect_chain,
                     "final_url":
                         current_url,
                     "retries":
                         retries,
-                    "etag": None,
-                    "last_modified": None,
+                    "etag":
+                        None,
+                    "last_modified":
+                        None,
                     "error":
-                        str(error)
+                        str(error),
                 }
 
             except Exception as error:
+
+                if (
+                    pool is not None
+                    and connection is not None
+                ):
+
+                    pool.discard(
+                        connection
+                    )
+
+                    connection = None
 
                 return {
                     "url":
                         current_url,
                     "requested_url":
                         url,
-                    "status": 0,
+                    "status":
+                        0,
                     "status_type":
                         "fetch_error",
-                    "content_type": "",
-                    "headers": {},
-                    "body": b"",
+                    "content_type":
+                        "",
+                    "headers":
+                        {},
+                    "body":
+                        b"",
                     "redirect_chain":
                         redirect_chain,
                     "final_url":
                         current_url,
                     "retries":
                         retries,
-                    "etag": None,
-                    "last_modified": None,
+                    "etag":
+                        None,
+                    "last_modified":
+                        None,
                     "error":
-                        str(error)
+                        str(error),
                 }
+
+            finally:
+
+                if (
+                    pool is not None
+                    and connection is not None
+                ):
+
+                    if reusable:
+                        pool.release(
+                            connection
+                        )
+                    else:
+                        pool.discard(
+                            connection
+                        )
+
+    # ---------------------------------------------------------
+    # Pool diagnostics
+    # ---------------------------------------------------------
+
+    def pool_stats(self):
+
+        with self._pools_lock:
+
+            return {
+                origin:
+                    pool.stats()
+                for origin, pool
+                in self._pools.items()
+            }
+
+    # ---------------------------------------------------------
+    # Lifecycle
+    # ---------------------------------------------------------
+
+    def close(self):
+
+        if self._closed:
+            return
+
+        self._closed = True
+
+        with self._pools_lock:
+
+            for pool in (
+                self._pools.values()
+            ):
+
+                pool.close()
+
+            self._pools.clear()
+
+    def __enter__(self):
+
+        return self
+
+    def __exit__(
+        self,
+        exc_type,
+        exc_value,
+        traceback,
+    ):
+
+        self.close()
+
+    # ---------------------------------------------------------
+    # URL helpers
+    # ---------------------------------------------------------
 
     @staticmethod
     def _absolute_url(
         base_url,
-        location
+        location,
     ):
 
         return urljoin(
             base_url,
-            location
+            location,
         )
 
     @staticmethod
