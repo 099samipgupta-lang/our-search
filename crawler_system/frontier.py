@@ -74,9 +74,18 @@ class CrawlFrontier:
 
         if existing is None:
             host = self._domain(normalized_url)
-
             document_id = DocumentIdentity.from_normalized_url(
                 normalized_url
+            )
+
+            # Initialize the host BEFORE inserting the URL.
+            # add_discovered() creates the host with its database default
+            # only when the host does not already exist. Initializing it
+            # first therefore ensures this frontier's configured delay
+            # becomes the authoritative initial host policy.
+            self.state_store.ensure_host(
+                host,
+                crawl_delay=self.default_delay,
             )
 
             inserted = self.state_store.add_discovered(

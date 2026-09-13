@@ -52,11 +52,22 @@ class WorkerCoordinator:
         self.running = True
 
     def _get_previous_state(self, url):
+        get_state = getattr(
+            self.frontier,
+            "get_state",
+            None,
+        )
+
+        if get_state is not None:
+            try:
+                return get_state(url)
+            except Exception:
+                return None
 
         state_store = getattr(
             self.frontier,
             "state_store",
-            None
+            None,
         )
 
         if state_store is None:
@@ -486,26 +497,31 @@ class WorkerCoordinator:
 
             try:
 
-                state_store = getattr(
+                release = getattr(
                     self.frontier,
-                    "state_store",
-                    None
+                    "release",
+                    None,
                 )
 
-                if state_store is not None:
-
-                    state_store.release_lease(
+                if release is not None:
+                    release(
                         task.url,
                         retry_at=None,
-                        increment_attempts=False
+                        priority=task.priority,
                     )
-
                 else:
-
-                    self.frontier.release(
-                        task.url,
-                        priority=task.priority
+                    state_store = getattr(
+                        self.frontier,
+                        "state_store",
+                        None,
                     )
+
+                    if state_store is not None:
+                        state_store.release_lease(
+                            task.url,
+                            retry_at=None,
+                            increment_attempts=False,
+                        )
 
             except Exception:
                 pass
