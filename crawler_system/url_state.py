@@ -3,6 +3,7 @@ import sqlite3
 import threading
 import time
 from typing import Any, Dict, List, Optional
+from crawler_system.ready_frontier import ReadyFrontier
 
 
 class URLStateStore:
@@ -15,7 +16,7 @@ class URLStateStore:
     be replaced by distributed storage.
     """
 
-    SCHEMA_VERSION = 3
+    SCHEMA_VERSION = 4
 
     def __init__(
         self,
@@ -47,6 +48,15 @@ class URLStateStore:
 
         self._configure()
         self._initialize_schema()
+
+        # Stage 5.2 indexed scheduling frontier.
+        self._ready_frontier = ReadyFrontier(self._connection)
+        self._initialize_ready_frontier_triggers()
+
+        # Existing databases may contain URL state created before the
+        # ready frontier existed. Rebuild the scheduling index once.
+        if self._ready_frontier.count() == 0 and self.count() > 0:
+            self._ready_frontier.rebuild()
 
     # ============================================================
     # SQLITE CONFIGURATION
@@ -207,6 +217,115 @@ class URLStateStore:
     # ============================================================
     # URL INSERTION
     # ============================================================
+
+    # ============================================================
+    # STAGE 5.2 — INDEXED READY FRONTIER
+    # ============================================================
+
+    def _initialize_ready_frontier_triggers(self) -> None:
+        """
+        Maintain ready_frontier transactionally from authoritative URL
+        state. The urls table remains the source of truth.
+        """
+        with self._lock:
+            self._connection.executescript(
+                """
+                DROP TRIGGER IF EXISTS trg_urls_ready_insert;
+                DROP TRIGGER IF EXISTS trg_urls_ready_update;
+                DROP TRIGGER IF EXISTS trg_urls_ready_delete;
+
+                CREATE TRIGGER trg_urls_ready_insert
+                AFTER INSERT ON urls
+                WHEN NEW.state IN ('discovered', 'queued', 'retry')
+                BEGIN
+                    INSERT INTO ready_frontier (
+                        url,
+                        host,
+                        priority,
+                        ready_at,
+                        sequence
+                    )
+                    VALUES (
+                        NEW.url,
+                        NEW.host,
+                        NEW.priority,
+                        COALESCE(
+                            NEW.next_crawl_at,
+                            NEW.discovered_at
+                        ),
+                        NEW.rowid
+                    )
+                    ON CONFLICT(url)
+                    DO UPDATE SET
+                        host = excluded.host,
+                        priority = excluded.priority,
+                        ready_at = excluded.ready_at,
+                        sequence = excluded.sequence;
+                END;
+
+                CREATE TRIGGER trg_urls_ready_update
+                AFTER UPDATE OF
+                    state,
+                    host,
+                    priority,
+                    next_crawl_at,
+                    discovered_at
+                ON urls
+                BEGIN
+                    DELETE FROM ready_frontier
+                    WHERE url = NEW.url;
+
+                    INSERT INTO ready_frontier (
+                        url,
+                        host,
+                        priority,
+                        ready_at,
+                        sequence
+                    )
+                    SELECT
+                        NEW.url,
+                        NEW.host,
+                        NEW.priority,
+                        COALESCE(
+                            NEW.next_crawl_at,
+                            NEW.discovered_at
+                        ),
+                        NEW.rowid
+                    WHERE NEW.state IN (
+                        'discovered',
+                        'queued',
+                        'retry'
+                    );
+                END;
+
+                CREATE TRIGGER trg_urls_ready_delete
+                AFTER DELETE ON urls
+                BEGIN
+                    DELETE FROM ready_frontier
+                    WHERE url = OLD.url;
+                END;
+                """
+            )
+            self._connection.commit()
+
+    def ready_size(self) -> int:
+        """Return the number of indexed ready-work entries."""
+        with self._lock:
+            return self._ready_frontier.count()
+
+    def rebuild_ready_frontier(self) -> int:
+        """Rebuild the scheduling index from authoritative URL state."""
+        with self._lock:
+            try:
+                self._connection.execute("BEGIN IMMEDIATE")
+                count = self._ready_frontier.rebuild(
+                    commit=False
+                )
+                self._connection.commit()
+                return count
+            except Exception:
+                self._connection.rollback()
+                raise
 
     def add_discovered(
         self,
@@ -697,18 +816,16 @@ class URLStateStore:
     def claim_next(
         self,
         owner: str,
-        now: Optional[float] = None
+        now: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
         """
-        Atomically claim the highest-priority ready URL.
+        Atomically claim the next eligible URL through ready_frontier.
 
-        Host crawl timing is respected inside the same transaction.
+        urls and hosts remain authoritative. ready_frontier is only the
+        indexed scheduling path.
         """
-
         if not owner:
-            raise ValueError(
-                "owner must not be empty"
-            )
+            raise ValueError("owner must not be empty")
 
         timestamp = (
             time.time()
@@ -717,23 +834,26 @@ class URLStateStore:
         )
 
         with self._lock:
-
             connection = self._connection
 
             try:
-
-                connection.execute(
-                    "BEGIN IMMEDIATE"
-                )
+                connection.execute("BEGIN IMMEDIATE")
 
                 row = connection.execute(
                     """
                     SELECT
+                        rf.url,
+                        rf.host,
+                        rf.priority,
+                        rf.ready_at,
+                        rf.sequence,
                         u.*,
                         h.crawl_delay,
                         h.last_crawl_time,
                         h.next_allowed_time
-                    FROM urls AS u
+                    FROM ready_frontier AS rf
+                    JOIN urls AS u
+                        ON u.url = rf.url
                     JOIN hosts AS h
                         ON h.host = u.host
                     WHERE u.state IN (
@@ -746,30 +866,20 @@ class URLStateStore:
                         OR u.next_crawl_at <= ?
                     )
                     AND MAX(
-                        h.last_crawl_time
-                        + h.crawl_delay,
+                        h.last_crawl_time + h.crawl_delay,
                         h.next_allowed_time
                     ) <= ?
                     ORDER BY
-                        u.priority DESC,
-                        COALESCE(
-                            u.next_crawl_at,
-                            0
-                        ) ASC,
-                        u.discovered_at ASC,
-                        u.url ASC
+                        rf.priority DESC,
+                        rf.ready_at ASC,
+                        rf.sequence ASC
                     LIMIT 1
                     """,
-                    (
-                        timestamp,
-                        timestamp,
-                    )
+                    (timestamp, timestamp),
                 ).fetchone()
 
                 if row is None:
-
                     connection.rollback()
-
                     return None
 
                 url = row["url"]
@@ -789,38 +899,19 @@ class URLStateStore:
                           'retry'
                       )
                     """,
-                    (
-                        owner,
-                        timestamp,
-                        url,
-                    )
+                    (owner, timestamp, url),
                 )
 
                 if cursor.rowcount != 1:
-
                     connection.rollback()
-
                     return None
 
-                current_ready = max(
-                    float(
-                        row["last_crawl_time"]
-                    )
-                    + float(
-                        row["crawl_delay"]
-                    ),
-                    float(
-                        row["next_allowed_time"]
-                    ),
-                    timestamp
-                )
-
-                reserved_time = (
-                    current_ready
-                    + float(
-                        row["crawl_delay"]
-                    )
-                )
+                reserved_time = max(
+                    float(row["last_crawl_time"])
+                    + float(row["crawl_delay"]),
+                    float(row["next_allowed_time"]),
+                    timestamp,
+                ) + float(row["crawl_delay"])
 
                 connection.execute(
                     """
@@ -828,11 +919,11 @@ class URLStateStore:
                     SET next_allowed_time = ?
                     WHERE host = ?
                     """,
-                    (
-                        reserved_time,
-                        host,
-                    )
+                    (reserved_time, host),
                 )
+
+                # The URL state update fires the ready-frontier trigger,
+                # removing the leased URL from the scheduling index.
 
                 claimed = connection.execute(
                     """
@@ -840,26 +931,16 @@ class URLStateStore:
                     FROM urls
                     WHERE url = ?
                     """,
-                    (
-                        url,
-                    )
+                    (url,),
                 ).fetchone()
 
                 connection.commit()
 
-                return dict(
-                    claimed
-                )
+                return dict(claimed)
 
             except Exception:
-
                 connection.rollback()
-
                 raise
-
-    # ============================================================
-    # COMPLETE
-    # ============================================================
 
     def mark_crawled(
         self,
