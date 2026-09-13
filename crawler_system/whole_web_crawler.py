@@ -8,6 +8,7 @@ from crawler_system.expansion_store import ExpansionCandidateStore
 from crawler_system.expansion_priority import ExpansionPriority
 from crawler_system.expansion_queue import ExpansionQueue
 from crawler_system.continuous_expansion_controller import ContinuousExpansionController
+from crawler_system.continuous_expansion_failure_recovery import ContinuousExpansionFailureRecovery
 from crawler_system.priority import CrawlPriority
 from crawler_system.url_normalizer import URLNormalizer
 from crawler_system.dedup import URLDeduplicator
@@ -124,6 +125,28 @@ class WholeWebCrawler:
 
         self.expansion_queue = ExpansionQueue(
             database_path=expansion_database_path
+        )
+
+        # ---------------------------------------------------------
+        # Continuous Expansion Failure Recovery
+        #
+        # Tracks durable retry budgets for expansion candidates.
+        # The expansion queue remains the source of truth for
+        # actual queued/processing/complete/failed work.
+        # ---------------------------------------------------------
+
+        recovery_database_path = (
+            f"{storage_root.rstrip('/')}/"
+            "expansion_failure_recovery.db"
+        )
+
+        self.expansion_failure_recovery = (
+            ContinuousExpansionFailureRecovery(
+                expansion_queue=self.expansion_queue,
+                database_path=recovery_database_path,
+                max_attempts=max_attempts,
+                retry_delay=0.0,
+            )
         )
 
         # ---------------------------------------------------------
@@ -1034,10 +1057,9 @@ class WholeWebCrawler:
         discovery and stored independently from the normal URL
         frontier.
 
-        This processor turns queued expansion candidates into
-        normal crawl work. If the candidate URL is already active
-        in the frontier, it is treated as successfully expanded
-        rather than being queued a second time.
+        The queue remains the source of truth for expansion work.
+        Failure recovery adds a durable retry budget around actual
+        processing failures.
 
         Returns the number of expansion candidates consumed.
         """
@@ -1070,6 +1092,11 @@ class WholeWebCrawler:
                     self.expansion_queue.mark_failed(
                         hostname
                     )
+
+                    self.expansion_failure_recovery.handle_failure(
+                        candidate
+                    )
+
                     continue
 
                 added = self._add_url(
@@ -1082,6 +1109,10 @@ class WholeWebCrawler:
 
                 if added:
                     self.expansion_queue.mark_complete(
+                        hostname
+                    )
+
+                    self.expansion_failure_recovery.handle_success(
                         hostname
                     )
 
@@ -1102,6 +1133,10 @@ class WholeWebCrawler:
                         hostname
                     )
 
+                    self.expansion_failure_recovery.handle_success(
+                        hostname
+                    )
+
                     processed += 1
                     continue
 
@@ -1109,10 +1144,24 @@ class WholeWebCrawler:
                     hostname
                 )
 
-            except Exception:
-                self.expansion_queue.mark_failed(
-                    hostname
+                self.expansion_failure_recovery.handle_failure(
+                    candidate
                 )
+
+            except Exception:
+                try:
+                    self.expansion_queue.mark_failed(
+                        hostname
+                    )
+                except Exception:
+                    pass
+
+                try:
+                    self.expansion_failure_recovery.handle_failure(
+                        candidate
+                    )
+                except Exception:
+                    pass
 
         return processed
 
@@ -1260,6 +1309,15 @@ class WholeWebCrawler:
         self.running = False
         self.expansion_controller.stop()
 
+        recovery = getattr(
+            self,
+            "expansion_failure_recovery",
+            None
+        )
+
+        if recovery is not None:
+            recovery.close()
+
         self.coordinator.stop()
 
         integration = getattr(
@@ -1320,6 +1378,10 @@ class WholeWebCrawler:
 
             "expansion_controller": (
                 self.expansion_controller.status()
+            ),
+
+            "expansion_failure_recovery": (
+                self.expansion_failure_recovery.status()
             ),
 
             "indexing": (
