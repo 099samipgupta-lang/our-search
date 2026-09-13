@@ -33,6 +33,7 @@ class ContinuousDomainDiscoveryLoop:
         cycle_interval=5.0,
         max_contexts_per_cycle=10,
         activation_batch_size=100,
+        feedback_controller=None,
     ):
         if discovery_pipeline is None:
             raise TypeError("discovery_pipeline is required")
@@ -66,6 +67,7 @@ class ContinuousDomainDiscoveryLoop:
 
         self.discovery_pipeline = discovery_pipeline
         self.activator = activator
+        self.feedback_controller = feedback_controller
 
         self.contexts = (
             list(contexts)
@@ -278,9 +280,26 @@ class ContinuousDomainDiscoveryLoop:
             hostname = candidate.get("hostname")
 
             try:
-                result = self.activator.activate(
-                    hostname
-                )
+                if self.feedback_controller is None:
+                    result = self.activator.activate(
+                        hostname
+                    )
+                else:
+                    try:
+                        adapted_priority = (
+                            self.feedback_controller
+                            .adapt_candidate_priority(candidate)
+                        )
+                    except Exception:
+                        adapted_priority = candidate.get(
+                            "priority",
+                            50.0,
+                        )
+
+                    result = self.activator.activate(
+                        hostname,
+                        priority=adapted_priority,
+                    )
 
                 if not isinstance(result, dict):
                     result = {
@@ -351,6 +370,20 @@ class ContinuousDomainDiscoveryLoop:
 
         activation = self.activate_once()
 
+        feedback = None
+
+        if self.feedback_controller is not None:
+            try:
+                feedback = self.feedback_controller.process(
+                    limit=self.activation_batch_size,
+                )
+            except Exception:
+                feedback = {
+                    "processed": 0,
+                    "results": [],
+                    "error": True,
+                }
+
         with self._lock:
             self.stats["cycles"] += 1
 
@@ -399,6 +432,7 @@ class ContinuousDomainDiscoveryLoop:
         return {
             "discovery": discovery,
             "activation": activation,
+            "feedback": feedback,
             "duration": time.time() - started_at,
         }
 
