@@ -409,10 +409,14 @@ def main():
         # --------------------------------------------------------------
         concurrent_tasks = []
 
-        for index in range(40):
+        # Use distinct hostnames so host-based partition routing can
+        # distribute tasks across partitions/nodes. All *.localhost
+        # names resolve to loopback, so the real HTTP server remains
+        # local while the routing layer sees distinct hosts.
+        for index in range(200):
             task = CrawlTask(
                 url=(
-                    f"http://127.0.0.1:"
+                    f"http://bulk-{index}.localhost:"
                     f"{http_server.server_port}/bulk/{index}"
                 ),
                 document_id=f"bulk-integration-{index}",
@@ -421,10 +425,12 @@ def main():
             if source_dispatcher.owner_for_task(task) == "node-b":
                 concurrent_tasks.append(task)
 
-        assert concurrent_tasks
+            if len(concurrent_tasks) == 20:
+                break
 
-        # Keep task count bounded while guaranteeing remote ownership.
-        concurrent_tasks = concurrent_tasks[:20]
+        # The test must have enough independently routed remote tasks
+        # before exercising concurrent distributed execution.
+        assert len(concurrent_tasks) == 20
 
         def send(task):
             message_id = f"bulk-message-{task.document_id}"
