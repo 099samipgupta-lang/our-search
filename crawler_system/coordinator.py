@@ -398,13 +398,40 @@ class WorkerCoordinator:
 
             self.completed += 1
 
-        else:
+        elif status in (404, 410):
+            # Terminal HTTP responses: the URL was
+            # successfully processed and can be
+            # handled by index deletion logic.
+            self.frontier.complete(
+                result.task.url
+            )
+            self.completed += 1
 
-            self._retry_task(
-                result.task
+        else:
+            response_error = result.response.get(
+                "error"
             )
 
-        return result
+            if response_error is None:
+                response_error = (
+                    f"HTTP status {status}"
+                )
+
+            failed = self.frontier.mark_failed(
+                result.task.url,
+                error=response_error,
+                retry_delay=30,
+            )
+
+            if failed:
+                if result.task.attempt + 1 < self.max_attempts:
+                    self.retried += 1
+                else:
+                    self.failed += 1
+            else:
+                self.failed += 1
+
+            return result
 
     def run_once(self):
 

@@ -16,7 +16,7 @@ class URLStateStore:
     be replaced by distributed storage.
     """
 
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
 
     def __init__(
         self,
@@ -125,7 +125,10 @@ class URLStateStore:
 
                     next_allowed_time REAL NOT NULL DEFAULT 0,
 
-                    failures INTEGER NOT NULL DEFAULT 0
+                    failures INTEGER NOT NULL DEFAULT 0,
+                    active_concurrency INTEGER NOT NULL DEFAULT 0,
+                    max_concurrency INTEGER NOT NULL DEFAULT 1,
+                    backoff_until REAL NOT NULL DEFAULT 0
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_urls_state_priority
@@ -185,6 +188,54 @@ class URLStateStore:
                     """
                 )
 
+            # ----------------------------------------------------
+            # MIGRATION: v4 -> v5 domain scheduling state
+            # ----------------------------------------------------
+            host_columns = {
+                row["name"]
+                for row in self._connection.execute(
+                    "PRAGMA table_info(hosts)"
+                ).fetchall()
+            }
+
+            if "active_concurrency" not in host_columns:
+                self._connection.execute(
+                    """
+                    ALTER TABLE hosts
+                    ADD COLUMN active_concurrency INTEGER NOT NULL DEFAULT 0
+                    """
+                )
+
+            if "max_concurrency" not in host_columns:
+                self._connection.execute(
+                    """
+                    ALTER TABLE hosts
+                    ADD COLUMN max_concurrency INTEGER NOT NULL DEFAULT 1
+                    """
+                )
+
+            if "backoff_until" not in host_columns:
+                self._connection.execute(
+                    """
+                    ALTER TABLE hosts
+                    ADD COLUMN backoff_until REAL NOT NULL DEFAULT 0
+                    """
+                )
+
+            self._connection.execute(
+                """
+                UPDATE hosts
+                SET
+                    active_concurrency = COALESCE(active_concurrency, 0),
+                    max_concurrency = CASE
+                        WHEN max_concurrency IS NULL OR max_concurrency <= 0
+                        THEN 1
+                        ELSE max_concurrency
+                    END,
+                    backoff_until = COALESCE(backoff_until, 0)
+                """
+            )
+
             self._connection.execute(
                 """
                 INSERT OR IGNORE INTO metadata(
@@ -199,6 +250,17 @@ class URLStateStore:
                 (
                     str(self.SCHEMA_VERSION),
                 )
+            )
+
+            self._connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_hosts_scheduler
+                ON hosts(
+                    next_allowed_time,
+                    backoff_until,
+                    active_concurrency
+                )
+                """
             )
 
             self._connection.execute(
@@ -657,6 +719,304 @@ class URLStateStore:
                 host
             )
 
+    def ensure_domain_scheduler_state(
+        self,
+        host: str,
+        max_concurrency: int = 1,
+    ) -> Dict[str, Any]:
+        """Ensure durable scheduler state exists for a host."""
+
+        if not host:
+            raise ValueError("host must not be empty")
+
+        if int(max_concurrency) <= 0:
+            raise ValueError(
+                "max_concurrency must be greater than zero"
+            )
+
+        with self._lock:
+            self._connection.execute(
+                """
+                UPDATE hosts
+                SET
+                    active_concurrency = COALESCE(active_concurrency, 0),
+                    max_concurrency = CASE
+                        WHEN max_concurrency IS NULL OR max_concurrency <= 0
+                        THEN ?
+                        ELSE max_concurrency
+                    END,
+                    backoff_until = COALESCE(backoff_until, 0)
+                WHERE host = ?
+                """,
+                (
+                    int(max_concurrency),
+                    host,
+                ),
+            )
+
+            self._connection.commit()
+
+            record = self.get_host(host)
+
+            if record is None:
+                raise KeyError(f"unknown host: {host}")
+
+            return record
+
+    def set_host_max_concurrency(
+        self,
+        host: str,
+        max_concurrency: int,
+    ) -> Dict[str, Any]:
+        """Set the durable maximum concurrency for a host."""
+
+        if int(max_concurrency) <= 0:
+            raise ValueError(
+                "max_concurrency must be greater than zero"
+            )
+
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                UPDATE hosts
+                SET max_concurrency = ?
+                WHERE host = ?
+                """,
+                (
+                    int(max_concurrency),
+                    host,
+                ),
+            )
+
+            if cursor.rowcount != 1:
+                self._connection.commit()
+                raise KeyError(f"unknown host: {host}")
+
+            self._connection.commit()
+
+            record = self.get_host(host)
+
+            if record is None:
+                raise KeyError(f"unknown host: {host}")
+
+            return record
+
+    def acquire_host_slot(
+        self,
+        host: str,
+        now: Optional[float] = None,
+    ) -> bool:
+        """Atomically acquire one available domain scheduling slot."""
+
+        timestamp = (
+            time.time()
+            if now is None
+            else float(now)
+        )
+
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+
+            row = self._connection.execute(
+                """
+                SELECT
+                    crawl_delay,
+                    last_crawl_time,
+                    next_allowed_time,
+                    active_concurrency,
+                    max_concurrency,
+                    backoff_until
+                FROM hosts
+                WHERE host = ?
+                """,
+                (host,),
+            ).fetchone()
+
+            if row is None:
+                self._connection.rollback()
+                return False
+
+            ready_at = max(
+                float(row["last_crawl_time"]) + float(row["crawl_delay"]),
+                float(row["next_allowed_time"]),
+                float(row["backoff_until"]),
+            )
+
+            if ready_at > timestamp:
+                self._connection.rollback()
+                return False
+
+            if int(row["active_concurrency"]) >= int(
+                row["max_concurrency"]
+            ):
+                self._connection.rollback()
+                return False
+
+            reserved_until = max(
+                ready_at,
+                timestamp,
+            ) + float(row["crawl_delay"])
+
+            cursor = self._connection.execute(
+                """
+                UPDATE hosts
+                SET
+                    active_concurrency = active_concurrency + 1,
+                    next_allowed_time = ?
+                WHERE host = ?
+                  AND active_concurrency < max_concurrency
+                """,
+                (
+                    reserved_until,
+                    host,
+                ),
+            )
+
+            if cursor.rowcount != 1:
+                self._connection.rollback()
+                return False
+
+            self._connection.commit()
+            return True
+
+    def release_host_slot(self, host: str) -> bool:
+        """Release one active domain scheduling slot."""
+
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                UPDATE hosts
+                SET active_concurrency =
+                    CASE
+                        WHEN active_concurrency > 0
+                        THEN active_concurrency - 1
+                        ELSE 0
+                    END
+                WHERE host = ?
+                """,
+                (host,),
+            )
+
+            self._connection.commit()
+            return cursor.rowcount == 1
+
+    def record_domain_success(
+        self,
+        host: str,
+        crawled_at: Optional[float] = None,
+    ) -> Dict[str, Any]:
+        """Reset domain failure state after successful crawling."""
+
+        timestamp = (
+            time.time()
+            if crawled_at is None
+            else float(crawled_at)
+        )
+
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                UPDATE hosts
+                SET
+                    last_crawl_time = ?,
+                    failures = 0,
+                    backoff_until = 0
+                WHERE host = ?
+                """,
+                (
+                    timestamp,
+                    host,
+                ),
+            )
+
+            if cursor.rowcount != 1:
+                self._connection.commit()
+                raise KeyError(f"unknown host: {host}")
+
+            self._connection.commit()
+
+            record = self.get_host(host)
+
+            if record is None:
+                raise KeyError(f"unknown host: {host}")
+
+            return record
+
+    def record_domain_failure(
+        self,
+        host: str,
+        failed_at: Optional[float] = None,
+        backoff_base: float = 30.0,
+        backoff_max: float = 3600.0,
+        retryable: bool = True,
+    ) -> Dict[str, Any]:
+        """Record a domain failure and apply bounded exponential backoff."""
+
+        if backoff_base < 0:
+            raise ValueError(
+                "backoff_base must not be negative"
+            )
+
+        if backoff_max < backoff_base:
+            raise ValueError(
+                "backoff_max must be greater than or equal to backoff_base"
+            )
+
+        timestamp = (
+            time.time()
+            if failed_at is None
+            else float(failed_at)
+        )
+
+        with self._lock:
+            row = self._connection.execute(
+                """
+                SELECT failures
+                FROM hosts
+                WHERE host = ?
+                """,
+                (host,),
+            ).fetchone()
+
+            if row is None:
+                self._connection.rollback()
+                raise KeyError(f"unknown host: {host}")
+
+            failures = int(row["failures"]) + 1
+
+            if retryable and backoff_base > 0:
+                delay = min(
+                    float(backoff_base) * (2 ** (failures - 1)),
+                    float(backoff_max),
+                )
+                backoff_until = timestamp + delay
+            else:
+                backoff_until = timestamp
+
+            self._connection.execute(
+                """
+                UPDATE hosts
+                SET
+                    failures = ?,
+                    backoff_until = ?
+                WHERE host = ?
+                """,
+                (
+                    failures,
+                    backoff_until,
+                    host,
+                ),
+            )
+
+            self._connection.commit()
+
+            record = self.get_host(host)
+
+            if record is None:
+                raise KeyError(f"unknown host: {host}")
+
+            return record
+
     def get_host(
         self,
         host: str
@@ -818,12 +1178,8 @@ class URLStateStore:
         owner: str,
         now: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
-        """
-        Atomically claim the next eligible URL through ready_frontier.
+        """Atomically claim the highest-priority domain-ready URL."""
 
-        urls and hosts remain authoritative. ready_frontier is only the
-        indexed scheduling path.
-        """
         if not owner:
             raise ValueError("owner must not be empty")
 
@@ -834,129 +1190,161 @@ class URLStateStore:
         )
 
         with self._lock:
-            connection = self._connection
+            self._connection.execute("BEGIN IMMEDIATE")
 
-            try:
-                connection.execute("BEGIN IMMEDIATE")
+            row = self._connection.execute(
+                """
+                SELECT
+                    rf.url,
+                    rf.host,
+                    rf.priority,
+                    rf.ready_at,
+                    rf.sequence,
+                    u.document_id,
+                    u.state,
+                    u.attempts,
+                    u.source,
+                    u.discovered_at,
+                    u.last_crawled_at,
+                    u.next_crawl_at,
+                    u.last_status,
+                    u.last_error,
+                    u.lease_owner,
+                    u.leased_at,
+                    u.etag,
+                    u.last_modified,
+                    h.crawl_delay,
+                    h.last_crawl_time,
+                    h.next_allowed_time,
+                    h.failures,
+                    h.active_concurrency,
+                    h.max_concurrency,
+                    h.backoff_until
+                FROM ready_frontier rf
+                JOIN urls u ON u.url = rf.url
+                JOIN hosts h ON h.host = rf.host
+                WHERE u.state IN ('discovered', 'queued', 'retry')
+                  AND (
+                      u.next_crawl_at IS NULL
+                      OR u.next_crawl_at <= ?
+                  )
+                  AND MAX(
+                      h.last_crawl_time + h.crawl_delay,
+                      h.next_allowed_time,
+                      h.backoff_until
+                  ) <= ?
+                  AND h.active_concurrency < h.max_concurrency
+                ORDER BY
+                    (
+                        rf.priority
+                        + MIN(
+                            100.0,
+                            MAX(
+                                0.0,
+                                ? - MAX(
+                                    rf.ready_at,
+                                    h.last_crawl_time
+                                )
+                            )
+                        )
+                    ) DESC,
+                    rf.priority DESC,
+                    rf.ready_at ASC,
+                    rf.sequence ASC
+                LIMIT 1
+                """,
+                (timestamp, timestamp, timestamp),
+            ).fetchone()
 
-                row = connection.execute(
-                    """
-                    SELECT
-                        rf.url,
-                        rf.host,
-                        rf.priority,
-                        rf.ready_at,
-                        rf.sequence,
-                        u.*,
-                        h.crawl_delay,
-                        h.last_crawl_time,
-                        h.next_allowed_time
-                    FROM ready_frontier AS rf
-                    JOIN urls AS u
-                        ON u.url = rf.url
-                    JOIN hosts AS h
-                        ON h.host = u.host
-                    WHERE u.state IN (
-                        'discovered',
-                        'queued',
-                        'retry'
-                    )
-                    AND (
-                        u.next_crawl_at IS NULL
-                        OR u.next_crawl_at <= ?
-                    )
-                    AND MAX(
-                        h.last_crawl_time + h.crawl_delay,
-                        h.next_allowed_time
-                    ) <= ?
-                    ORDER BY
-                        rf.priority DESC,
-                        rf.ready_at ASC,
-                        rf.sequence ASC
-                    LIMIT 1
-                    """,
-                    (timestamp, timestamp),
-                ).fetchone()
+            if row is None:
+                self._connection.rollback()
+                return None
 
-                if row is None:
-                    connection.rollback()
-                    return None
+            host = str(row["host"])
+            delay = float(row["crawl_delay"])
 
-                url = row["url"]
-                host = row["host"]
+            reserved_time = max(
+                float(row["last_crawl_time"]) + delay,
+                float(row["next_allowed_time"]),
+                float(row["backoff_until"]),
+                timestamp,
+            ) + delay
 
-                cursor = connection.execute(
-                    """
-                    UPDATE urls
-                    SET
-                        state = 'leased',
-                        lease_owner = ?,
-                        leased_at = ?
-                    WHERE url = ?
-                      AND state IN (
-                          'discovered',
-                          'queued',
-                          'retry'
-                      )
-                    """,
-                    (owner, timestamp, url),
-                )
-
-                if cursor.rowcount != 1:
-                    connection.rollback()
-                    return None
-
-                reserved_time = max(
-                    float(row["last_crawl_time"])
-                    + float(row["crawl_delay"]),
-                    float(row["next_allowed_time"]),
+            host_cursor = self._connection.execute(
+                """
+                UPDATE hosts
+                SET
+                    active_concurrency = active_concurrency + 1,
+                    next_allowed_time = ?
+                WHERE host = ?
+                  AND active_concurrency < max_concurrency
+                  AND MAX(
+                      last_crawl_time + crawl_delay,
+                      next_allowed_time,
+                      backoff_until
+                  ) <= ?
+                """,
+                (
+                    reserved_time,
+                    host,
                     timestamp,
-                ) + float(row["crawl_delay"])
+                ),
+            )
 
-                connection.execute(
-                    """
-                    UPDATE hosts
-                    SET next_allowed_time = ?
-                    WHERE host = ?
-                    """,
-                    (reserved_time, host),
+            if host_cursor.rowcount != 1:
+                self._connection.rollback()
+                return None
+
+            url_cursor = self._connection.execute(
+                """
+                UPDATE urls
+                SET
+                    state = 'leased',
+                    lease_owner = ?,
+                    leased_at = ?
+                WHERE url = ?
+                  AND state IN ('discovered', 'queued', 'retry')
+                """,
+                (
+                    owner,
+                    timestamp,
+                    row["url"],
+                ),
+            )
+
+            if url_cursor.rowcount != 1:
+                self._connection.rollback()
+                return None
+
+            result = self._connection.execute(
+                """
+                SELECT *
+                FROM urls
+                WHERE url = ?
+                """,
+                (row["url"],),
+            ).fetchone()
+
+            if result is None:
+                self._connection.rollback()
+                raise RuntimeError(
+                    f"claimed URL disappeared: {row['url']}"
                 )
 
-                # The URL state update fires the ready-frontier trigger,
-                # removing the leased URL from the scheduling index.
+            self._connection.commit()
 
-                claimed = connection.execute(
-                    """
-                    SELECT *
-                    FROM urls
-                    WHERE url = ?
-                    """,
-                    (url,),
-                ).fetchone()
-
-                connection.commit()
-
-                return dict(claimed)
-
-            except Exception:
-                connection.rollback()
-                raise
+            return dict(result)
 
     def mark_crawled(
         self,
         url: str,
         status: Optional[int] = None,
+        error: Optional[str] = None,
         crawled_at: Optional[float] = None,
-        next_crawl_at: Optional[float] = None,
         etag: Optional[str] = None,
-        last_modified: Optional[str] = None
+        last_modified: Optional[str] = None,
     ) -> bool:
-        """
-        Mark a URL as successfully crawled.
-
-        HTTP cache validators are persisted so future recrawls
-        can use conditional requests.
-        """
+        """Mark a leased URL crawled and release its domain slot."""
 
         timestamp = (
             time.time()
@@ -965,22 +1353,22 @@ class URLStateStore:
         )
 
         with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
 
             row = self._connection.execute(
                 """
-                SELECT host
+                SELECT host, state
                 FROM urls
                 WHERE url = ?
                 """,
-                (
-                    url,
-                )
+                (url,),
             ).fetchone()
 
-            if row is None:
+            if row is None or row["state"] != "leased":
+                self._connection.rollback()
                 return False
 
-            host = row["host"]
+            host = str(row["host"])
 
             cursor = self._connection.execute(
                 """
@@ -988,63 +1376,124 @@ class URLStateStore:
                 SET
                     state = 'crawled',
                     last_crawled_at = ?,
-                    next_crawl_at = ?,
                     last_status = ?,
-                    last_error = NULL,
+                    last_error = ?,
                     lease_owner = NULL,
                     leased_at = NULL,
                     etag = ?,
                     last_modified = ?
                 WHERE url = ?
+                  AND state = 'leased'
                 """,
                 (
                     timestamp,
-                    next_crawl_at,
                     status,
+                    error,
                     etag,
                     last_modified,
                     url,
-                )
+                ),
             )
 
-            if cursor.rowcount == 1:
+            if cursor.rowcount != 1:
+                self._connection.rollback()
+                return False
 
-                self._connection.execute(
-                    """
-                    UPDATE hosts
-                    SET last_crawl_time = ?
-                    WHERE host = ?
-                    """,
-                    (
-                        timestamp,
-                        host,
-                    )
-                )
+            self._connection.execute(
+                """
+                UPDATE hosts
+                SET
+                    active_concurrency =
+                        CASE
+                            WHEN active_concurrency > 0
+                            THEN active_concurrency - 1
+                            ELSE 0
+                        END,
+                    last_crawl_time = ?,
+                    failures = 0,
+                    backoff_until = 0
+                WHERE host = ?
+                """,
+                (
+                    timestamp,
+                    host,
+                ),
+            )
 
             self._connection.commit()
-
-            return cursor.rowcount == 1
-
-    # ============================================================
-    # FAILURE / RETRY
-    # ============================================================
+            return True
 
     def mark_failed(
         self,
         url: str,
         error: Optional[str] = None,
         status: Optional[int] = None,
-        retry_at: Optional[float] = None
+        retry_at: Optional[float] = None,
+        backoff_base: float = 30.0,
+        backoff_max: float = 3600.0,
+        retryable: bool = True,
     ) -> bool:
-        """Mark a URL as failed or retry."""
+        """Mark a leased URL failed, release its slot, and adapt backoff."""
 
-        state = (
-            "retry"
-            if retry_at is not None
-            else "failed"
-        )
+        if backoff_base < 0:
+            raise ValueError(
+                "backoff_base must not be negative"
+            )
+
+        if backoff_max < backoff_base:
+            raise ValueError(
+                "backoff_max must be greater than or equal to backoff_base"
+            )
+
+        timestamp = time.time()
 
         with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+
+            row = self._connection.execute(
+                """
+                SELECT host, state
+                FROM urls
+                WHERE url = ?
+                """,
+                (url,),
+            ).fetchone()
+
+            if row is None or row["state"] != "leased":
+                self._connection.rollback()
+                return False
+
+            host = str(row["host"])
+
+            host_row = self._connection.execute(
+                """
+                SELECT failures
+                FROM hosts
+                WHERE host = ?
+                """,
+                (host,),
+            ).fetchone()
+
+            if host_row is None:
+                self._connection.rollback()
+                return False
+
+            failures = int(host_row["failures"]) + 1
+
+            if retryable and backoff_base > 0:
+                delay = min(
+                    float(backoff_base) * (2 ** (failures - 1)),
+                    float(backoff_max),
+                )
+                backoff_until = timestamp + delay
+            else:
+                backoff_until = timestamp
+
+            state = (
+                "retry"
+                if retry_at is not None
+                else "failed"
+            )
 
             cursor = self._connection.execute(
                 """
@@ -1058,6 +1507,7 @@ class URLStateStore:
                     lease_owner = NULL,
                     leased_at = NULL
                 WHERE url = ?
+                  AND state = 'leased'
                 """,
                 (
                     state,
@@ -1065,12 +1515,36 @@ class URLStateStore:
                     error,
                     retry_at,
                     url,
-                )
+                ),
+            )
+
+            if cursor.rowcount != 1:
+                self._connection.rollback()
+                return False
+
+            self._connection.execute(
+                """
+                UPDATE hosts
+                SET
+                    active_concurrency =
+                        CASE
+                            WHEN active_concurrency > 0
+                            THEN active_concurrency - 1
+                            ELSE 0
+                        END,
+                    failures = ?,
+                    backoff_until = ?
+                WHERE host = ?
+                """,
+                (
+                    failures,
+                    backoff_until,
+                    host,
+                ),
             )
 
             self._connection.commit()
-
-            return cursor.rowcount == 1
+            return True
 
     def release_lease(
         self,
@@ -1078,7 +1552,7 @@ class URLStateStore:
         retry_at: Optional[float] = None,
         increment_attempts: bool = False
     ) -> bool:
-        """Release a leased URL back to the queue."""
+        """Release a leased URL and exactly one domain slot."""
 
         state = (
             "retry"
@@ -1087,9 +1561,24 @@ class URLStateStore:
         )
 
         with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+
+            row = self._connection.execute(
+                """
+                SELECT host, state
+                FROM urls
+                WHERE url = ?
+                """,
+                (url,),
+            ).fetchone()
+
+            if row is None or row["state"] != "leased":
+                self._connection.rollback()
+                return False
+
+            host = str(row["host"])
 
             if increment_attempts:
-
                 cursor = self._connection.execute(
                     """
                     UPDATE urls
@@ -1106,11 +1595,9 @@ class URLStateStore:
                         state,
                         retry_at,
                         url,
-                    )
+                    ),
                 )
-
             else:
-
                 cursor = self._connection.execute(
                     """
                     UPDATE urls
@@ -1126,23 +1613,36 @@ class URLStateStore:
                         state,
                         retry_at,
                         url,
-                    )
+                    ),
                 )
 
+            if cursor.rowcount != 1:
+                self._connection.rollback()
+                return False
+
+            self._connection.execute(
+                """
+                UPDATE hosts
+                SET active_concurrency =
+                    CASE
+                        WHEN active_concurrency > 0
+                        THEN active_concurrency - 1
+                        ELSE 0
+                    END
+                WHERE host = ?
+                """,
+                (host,),
+            )
+
             self._connection.commit()
-
-            return cursor.rowcount == 1
-
-    # ============================================================
-    # LEASE RECOVERY
-    # ============================================================
+            return True
 
     def recover_expired_leases(
         self,
         lease_timeout: float,
         now: Optional[float] = None
     ) -> int:
-        """Recover leases belonging to dead workers."""
+        """Recover expired leases and release their domain slots."""
 
         if lease_timeout < 0:
             raise ValueError(
@@ -1155,12 +1655,26 @@ class URLStateStore:
             else float(now)
         )
 
-        cutoff = (
-            timestamp
-            - float(lease_timeout)
-        )
+        cutoff = timestamp - float(lease_timeout)
 
         with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+
+            rows = self._connection.execute(
+                """
+                SELECT host, COUNT(*) AS count
+                FROM urls
+                WHERE state = 'leased'
+                  AND leased_at IS NOT NULL
+                  AND leased_at <= ?
+                GROUP BY host
+                """,
+                (cutoff,),
+            ).fetchall()
+
+            if not rows:
+                self._connection.rollback()
+                return 0
 
             cursor = self._connection.execute(
                 """
@@ -1178,16 +1692,34 @@ class URLStateStore:
                 (
                     timestamp,
                     cutoff,
-                )
+                ),
             )
 
+            recovered = cursor.rowcount
+
+            for row in rows:
+                amount = int(row["count"])
+
+                self._connection.execute(
+                    """
+                    UPDATE hosts
+                    SET active_concurrency =
+                        CASE
+                            WHEN active_concurrency >= ?
+                            THEN active_concurrency - ?
+                            ELSE 0
+                        END
+                    WHERE host = ?
+                    """,
+                    (
+                        amount,
+                        amount,
+                        row["host"],
+                    ),
+                )
+
             self._connection.commit()
-
-            return cursor.rowcount
-
-    # ============================================================
-    # PRIORITY
-    # ============================================================
+            return recovered
 
     def update_priority(
         self,
