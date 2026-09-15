@@ -65,6 +65,7 @@ class SearchEngine:
         ranked = self.ranking.rank(
             terms,
             candidates,
+            query_text=query,
         )
 
         ranked = ranked[:top_k]
