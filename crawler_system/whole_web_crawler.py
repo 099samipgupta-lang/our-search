@@ -268,7 +268,13 @@ class WholeWebCrawler:
             "discovery_rejected": 0,
             "new_domains": 0,
             "expansion_candidates": 0,
-            "expansion_queued": 0
+            "expansion_queued": 0,
+            "stage10_cycles": 0,
+            "stage10_persistence_saves": 0,
+            "stage10_index_flushes": 0,
+            "stage10_lease_recoveries": 0,
+            "stage10_runtime_errors": 0,
+            "stage10_last_persisted_at": None
         }
 
     # =============================================================
@@ -1254,57 +1260,236 @@ class WholeWebCrawler:
     # CONTINUOUS MODE
     # =============================================================
 
+    # =============================================================
+    # STAGE 10 RUNTIME HARDENING
+    # =============================================================
+
+    def _stage10_recover_expired_leases(self):
+        """
+        Recover leases left behind by a previous crashed process.
+
+        Active leases are protected by using the coordinator task
+        timeout as the recovery threshold.
+        """
+        timeout = getattr(
+            self.coordinator,
+            "task_timeout",
+            60.0,
+        )
+
+        recovery_timeout = max(
+            1.0,
+            float(timeout),
+        )
+
+        try:
+            recovered = self.url_state.recover_expired_leases(
+                lease_timeout=recovery_timeout,
+                now=time.time(),
+            )
+        except Exception:
+            self.stats["stage10_runtime_errors"] += 1
+            return 0
+
+        recovered = int(recovered)
+
+        self.stats[
+            "stage10_lease_recoveries"
+        ] += recovered
+
+        return recovered
+
+    def _stage10_persist_runtime_state(self, flush_index=True):
+        """
+        Persist crawler runtime state during continuous operation.
+
+        This prevents continuous crawling from depending on the
+        finite run() method reaching its final checkpoint.
+        """
+        now = time.time()
+
+        try:
+            if flush_index:
+
+                integration = getattr(
+                    self,
+                    "index_integration",
+                    None,
+                )
+
+                if integration is not None:
+                    before = int(
+                        integration.status()
+                        .get("stats", {})
+                        .get("flushes", 0)
+                    )
+
+                    integration.flush()
+
+                    after = int(
+                        integration.status()
+                        .get("stats", {})
+                        .get("flushes", 0)
+                    )
+
+                    if after > before:
+                        self.stats[
+                            "stage10_index_flushes"
+                        ] += after - before
+
+            self.state_storage.save(
+                self.url_dedup,
+                self.content_dedup,
+                self.change_tracker,
+            )
+
+            self.stats[
+                "stage10_persistence_saves"
+            ] += 1
+
+            self.stats[
+                "stage10_last_persisted_at"
+            ] = now
+
+            return True
+
+        except Exception:
+            self.stats[
+                "stage10_runtime_errors"
+            ] += 1
+
+            return False
+
+    def _stage10_runtime_tick(
+        self,
+        persist_every=30.0,
+    ):
+        """
+        Perform periodic Stage 10 durability maintenance.
+        """
+        self.stats[
+            "stage10_cycles"
+        ] += 1
+
+        last_persisted = self.stats.get(
+            "stage10_last_persisted_at"
+        )
+
+        if (
+            last_persisted is None
+            or (
+                time.time()
+                - float(last_persisted)
+                >= float(persist_every)
+            )
+        ):
+            self._stage10_persist_runtime_state(
+                flush_index=True
+            )
+
     def continuous_loop(
         self,
-        interval=5
+        interval=5,
+        persist_every=30.0,
     ):
+        """
+        Run the crawler continuously with Stage 10 durability.
+
+        Existing crawler behavior remains responsible for:
+        monitoring, recrawling, expansion, dispatch, fetching,
+        result processing and discovery.
+
+        Stage 10 adds:
+        - restart-time expired lease recovery
+        - periodic index flushing
+        - periodic crawler-state persistence
+        - exception containment
+        - final durable checkpoint
+        """
 
         if self.running:
-
             return
 
         self.running = True
 
-        self.coordinator.start()
+        # Recover leases abandoned by an earlier process before
+        # new workers begin claiming work.
+        self._stage10_recover_expired_leases()
 
-        self._discover_sitemaps()
+        try:
+            self.coordinator.start()
 
-        while self.running:
+            self._discover_sitemaps()
 
-            self.coordinator.monitor()
+            while self.running:
 
-            self.reactivate_due_urls(
-                limit=100
+                try:
+                    self.coordinator.monitor()
+
+                    self.reactivate_due_urls(
+                        limit=100
+                    )
+
+                    self.expansion_controller.run_cycle()
+
+                    self.coordinator.dispatch()
+
+                    results = self.coordinator.collect(
+                        timeout=0.5
+                    )
+
+                    for result in results:
+                        self._process_result(result)
+
+                    self._stage10_runtime_tick(
+                        persist_every=persist_every
+                    )
+
+                except Exception:
+                    # One unexpected cycle error must not silently
+                    # terminate the production crawler.
+                    self.stats[
+                        "stage10_runtime_errors"
+                    ] += 1
+
+                    # Emergency checkpoint.
+                    self._stage10_persist_runtime_state(
+                        flush_index=True
+                    )
+
+                    time.sleep(
+                        max(
+                            0.1,
+                            float(interval),
+                        )
+                    )
+
+                    continue
+
+                time.sleep(
+                    max(
+                        0.1,
+                        float(interval),
+                    )
+                )
+
+        finally:
+            # Always checkpoint before leaving continuous mode.
+            self._stage10_persist_runtime_state(
+                flush_index=True
             )
 
-            self.expansion_controller.run_cycle()
+            self.coordinator.stop()
 
-            self.coordinator.dispatch()
-
-            results = (
-                self.coordinator.collect(
-                    timeout=0.5
-                )
-            )
-
-            for result in results:
-
-                self._process_result(
-                    result
-                )
-
-            time.sleep(
-                max(
-                    0.1,
-                    float(interval)
-                )
-            )
-
-    # =============================================================
-    # STOP
-    # =============================================================
+            self.running = False
 
     def stop(self):
+        # Stage 10: checkpoint durable state before
+        # closing storage and index resources.
+        self._stage10_persist_runtime_state(
+            flush_index=True
+        )
+
 
         self.running = False
         self.expansion_controller.stop()

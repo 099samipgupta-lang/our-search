@@ -431,7 +431,7 @@ class WorkerCoordinator:
             else:
                 self.failed += 1
 
-            return result
+        return result
 
     def run_once(self):
 

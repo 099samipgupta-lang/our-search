@@ -1343,6 +1343,7 @@ class URLStateStore:
         crawled_at: Optional[float] = None,
         etag: Optional[str] = None,
         last_modified: Optional[str] = None,
+        next_crawl_at: Optional[float] = None,
     ) -> bool:
         """Mark a leased URL crawled and release its domain slot."""
 
@@ -1381,7 +1382,8 @@ class URLStateStore:
                     lease_owner = NULL,
                     leased_at = NULL,
                     etag = ?,
-                    last_modified = ?
+                    last_modified = ?,
+                    next_crawl_at = ?
                 WHERE url = ?
                   AND state = 'leased'
                 """,
@@ -1391,6 +1393,7 @@ class URLStateStore:
                     error,
                     etag,
                     last_modified,
+                    None if next_crawl_at is None else float(next_crawl_at),
                     url,
                 ),
             )
