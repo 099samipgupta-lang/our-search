@@ -64,6 +64,21 @@ class ResultAssembler:
                     ),
                     "snippet": snippet,
                     "highlighted_snippet": highlighted,
+                    "description": document.get(
+                        "description",
+                        snippet,
+                    ),
+                    "metadata": dict(
+                        document.get(
+                            "metadata",
+                            {}
+                        )
+                        if isinstance(
+                            document.get("metadata", {}),
+                            dict
+                        )
+                        else {}
+                    ),
                     "score": float(
                         ranked.get("score", 0.0)
                     ),

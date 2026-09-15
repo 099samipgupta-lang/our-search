@@ -1,6 +1,7 @@
 from search_engine import SearchEngine
 from result_presentation import DocumentStore, ResultAssembler
 from indexing_pipeline.pipeline import CrawlIndexPipeline
+from exploration.experience import ExplorationExperience
 
 
 class SearchService:
@@ -8,6 +9,7 @@ class SearchService:
         self.engine = SearchEngine(index_source)
         self.document_store = document_store
         self.assembler = ResultAssembler(document_store)
+        self.exploration = ExplorationExperience()
         self.indexing_pipeline = indexing_pipeline
 
     def search(self, query, mode="OR", top_k=10):
@@ -37,13 +39,22 @@ class SearchService:
             total_candidates=response.total_candidates,
         )
 
+        experience = self.exploration.build(
+            query=response.query,
+            results=assembled["results"],
+        )
+
         return {
             "query": response.query,
             "mode": response.mode,
             "total_candidates": assembled[
                 "total_candidates"
             ],
-            "results": assembled["results"],
+            "results": experience["results"],
+            "related": experience["related"],
+            "experience_version": experience[
+                "experience_version"
+            ],
         }
 
     def index_document(self, payload):
