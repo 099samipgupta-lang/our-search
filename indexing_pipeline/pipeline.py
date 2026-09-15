@@ -115,6 +115,7 @@ class CrawlIndexPipeline:
         title,
         text,
         canonical_url="",
+        metadata=None,
     ):
         content_hash = self._hash_text(text)
 
@@ -168,11 +169,18 @@ class CrawlIndexPipeline:
             content_hash,
         )
 
+        document_metadata = dict(metadata or {})
+        document_metadata.setdefault(
+            "content_hash",
+            content_hash,
+        )
+
         self.document_store.add_document(
             document_id=document_id,
             title=title,
             url=url,
             text=text,
+            metadata=document_metadata,
         )
 
         self.stats["processed"] += 1

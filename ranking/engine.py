@@ -1,3 +1,4 @@
+from ranking.stage8_signals import Stage8SignalEngine
 from ranking.scorer import RankingScorer
 
 
@@ -7,6 +8,7 @@ class RankingEngine:
         self,
         index_source,
         scorer=None,
+        stage8_signals=None,
     ):
         self.index = index_source
 
@@ -14,6 +16,12 @@ class RankingEngine:
             scorer
             if scorer is not None
             else RankingScorer()
+        )
+
+        self.stage8_signals = (
+            stage8_signals
+            if stage8_signals is not None
+            else Stage8SignalEngine()
         )
 
         self._average_length_cache = None
@@ -260,6 +268,52 @@ class RankingEngine:
         )
 
         return len(postings)
+
+    def _stage8_adjustment(self, document_id):
+        document = self._document_metadata(document_id)
+
+        if not document:
+            return 1.0
+
+        last_crawled = document.get("last_crawled")
+
+        freshness = self.stage8_signals.freshness(
+            last_crawled
+        )
+
+        quality = self.stage8_signals.quality(
+            document.get("title", ""),
+            document.get("text", ""),
+        )
+
+        spam = self.stage8_signals.spam(
+            document.get("title", ""),
+            document.get("text", ""),
+            document.get("url", ""),
+        )
+
+        trust = self.stage8_signals.trust(
+            document.get("url", ""),
+            document.get("title", ""),
+            document.get("text", ""),
+        )
+
+        duplicate_penalty = self.stage8_signals.duplicate_penalty(
+            bool(document.get("exact_duplicate")),
+            bool(document.get("possible_duplicate")),
+        )
+
+        if document.get("active") is False:
+            return 0.0
+
+        return (
+            1.0
+            + 0.10 * freshness
+            + 0.10 * quality
+            + 0.05 * trust
+            - 0.20 * spam
+            - 0.15 * duplicate_penalty
+        )
 
     def score_document(
         self,

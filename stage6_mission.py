@@ -77,6 +77,7 @@ class DistributedIndex:
         title,
         text,
         canonical_url="",
+        metadata=None,
     ):
         pipeline = self.pipeline_for_document(
             document_id
@@ -88,6 +89,7 @@ class DistributedIndex:
             title=title,
             text=text,
             canonical_url=canonical_url,
+            metadata=metadata,
         )
 
     def remove_document(self, document_id):

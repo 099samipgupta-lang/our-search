@@ -1,3 +1,4 @@
+import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
@@ -181,6 +182,12 @@ class CrawlerIndexBridge:
                 canonical_url=(
                     extracted["canonical_url"]
                 ),
+                metadata={
+                    "last_crawled": time.time(),
+                    "content_type": "text/html",
+                    "status": 200,
+                    "active": True,
+                },
             )
 
             action = result.get(

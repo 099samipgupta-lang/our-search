@@ -14,17 +14,25 @@ class DocumentStore:
         url="",
         text="",
         description="",
+        metadata=None,
     ):
         if not document_id:
             raise ValueError("document_id is required")
 
-        self.documents[document_id] = {
+        record = {
             "document_id": document_id,
             "title": title or "",
             "url": url or "",
             "text": text or "",
             "description": description or "",
         }
+
+        if metadata:
+            if not isinstance(metadata, dict):
+                raise TypeError("metadata must be a dictionary")
+            record.update(dict(metadata))
+
+        self.documents[document_id] = record
 
     def get(self, document_id):
         return self.documents.get(document_id)
