@@ -7,7 +7,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Optional
 
-from crawler_system.domain_candidate_pipeline import DomainCandidatePipeline
+from crawler_system.domain_candidate_pipeline import (
+    DomainCandidatePipeline,
+)
 from crawler_system.domain_discovery_fabric import (
     ClaimedDomainDiscovery,
     DomainDiscoveryFabric,
@@ -37,35 +39,66 @@ class DomainDiscoveryFabricMetrics:
     activation_failures: int
 
 
+@dataclass(frozen=True)
+class DomainDiscoveryWorkerLease:
+    worker_id: str
+    shard_id: int
+    lease_owner: str
+    acquired_at: float
+
+
 class DomainDiscoveryFabricController:
     """
-    Production controller connecting independent domain discovery
-    sources to the durable distributed domain-discovery fabric.
+    Placement-aware distributed worker control plane for the global
+    domain-discovery fabric.
 
-    Scalable path:
+    The architecture intentionally separates:
 
-        DomainDiscoverySourceRegistry
-                    ↓
-        DomainCandidatePipeline
-                    ↓
-        DomainDiscoveryFabric
-                    ↓
-        leased shard workers
-                    ↓
-        activation callback
-                    ↓
-        WholeWebCrawler
+        logical identity
+              |
+              v
+        durable placement
+              |
+              v
+        physical work
+              |
+              v
+        worker acquisition
+              |
+              v
+        record-level leases
 
-    The DomainCandidateStore is deliberately NOT part of this path.
+    Workers are execution capacity.
+
+    Physical buckets are storage placement.
+
+    Logical partitions are stable identity.
+
+    None of those quantities are required to have the same cardinality.
+
+    The controller therefore never creates one worker per physical
+    bucket and never assumes that the physical bucket count represents
+    the size of the Web.
+
+    The worker layer operates on currently visible work and acquires
+    short-lived execution ownership through the existing durable
+    record leases.
     """
+
+    VERSION = "global-domain-discovery-controller.v4"
 
     def __init__(
         self,
         registry: DomainDiscoverySourceRegistry,
         fabric: DomainDiscoveryFabric,
-        candidate_pipeline: Optional[DomainCandidatePipeline] = None,
+        candidate_pipeline: Optional[
+            DomainCandidatePipeline
+        ] = None,
         activation_callback: Optional[
-            Callable[[str, str, int, Optional[str]], bool]
+            Callable[
+                [str, str, int, Optional[str]],
+                bool,
+            ]
         ] = None,
         discovery_workers: int = 8,
         domain_workers: int = 32,
@@ -92,7 +125,9 @@ class DomainDiscoveryFabricController:
             )
 
         if candidate_pipeline is None:
-            candidate_pipeline = DomainCandidatePipeline()
+            candidate_pipeline = (
+                DomainCandidatePipeline()
+            )
 
         if not isinstance(
             candidate_pipeline,
@@ -102,45 +137,60 @@ class DomainDiscoveryFabricController:
                 "candidate_pipeline must be DomainCandidatePipeline"
             )
 
-        discovery_workers = max(1, int(discovery_workers))
-        domain_workers = max(1, int(domain_workers))
-        claim_batch_size = max(1, int(claim_batch_size))
+        self.discovery_workers = max(
+            1,
+            int(discovery_workers),
+        )
 
-        lease_recovery_interval = float(lease_recovery_interval)
-        cycle_interval = float(cycle_interval)
-        max_contexts_per_cycle = max(
+        self.domain_workers = max(
+            1,
+            int(domain_workers),
+        )
+
+        self.claim_batch_size = max(
+            1,
+            int(claim_batch_size),
+        )
+
+        self.lease_recovery_interval = float(
+            lease_recovery_interval
+        )
+
+        self.cycle_interval = float(
+            cycle_interval
+        )
+
+        self.max_contexts_per_cycle = max(
             1,
             int(max_contexts_per_cycle),
         )
-        worker_idle_sleep = max(
+
+        self.worker_idle_sleep = max(
             0.01,
             float(worker_idle_sleep),
         )
 
-        if lease_recovery_interval <= 0:
+        if self.lease_recovery_interval <= 0:
             raise ValueError(
                 "lease_recovery_interval must be positive"
             )
 
-        if cycle_interval < 0:
+        if self.cycle_interval < 0:
             raise ValueError(
                 "cycle_interval cannot be negative"
             )
 
         self.registry = registry
         self.fabric = fabric
-        self.candidate_pipeline = candidate_pipeline
-        self.activation_callback = activation_callback
-
-        self.discovery_workers = discovery_workers
-        self.domain_workers = domain_workers
-        self.claim_batch_size = claim_batch_size
-        self.lease_recovery_interval = lease_recovery_interval
-        self.cycle_interval = cycle_interval
-        self.max_contexts_per_cycle = max_contexts_per_cycle
-        self.worker_idle_sleep = worker_idle_sleep
+        self.candidate_pipeline = (
+            candidate_pipeline
+        )
+        self.activation_callback = (
+            activation_callback
+        )
 
         self._stop_event = threading.Event()
+
         self._metrics_lock = threading.RLock()
 
         self._metrics = {
@@ -165,21 +215,36 @@ class DomainDiscoveryFabricController:
     # Metrics
     # ============================================================
 
-    def _increment(self, name: str, value: int = 1) -> None:
+    def _increment(
+        self,
+        name: str,
+        value: int = 1,
+    ) -> None:
         with self._metrics_lock:
             self._metrics[name] = (
-                self._metrics.get(name, 0) + int(value)
+                self._metrics.get(name, 0)
+                + int(value)
             )
 
-    def metrics(self) -> DomainDiscoveryFabricMetrics:
+    def metrics(
+        self,
+    ) -> DomainDiscoveryFabricMetrics:
         with self._metrics_lock:
-            values = dict(self._metrics)
+            values = dict(
+                self._metrics
+            )
 
         return DomainDiscoveryFabricMetrics(
             cycles=values["cycles"],
-            source_discoveries=values["source_discoveries"],
-            candidates_seen=values["candidates_seen"],
-            candidates_accepted=values["candidates_accepted"],
+            source_discoveries=values[
+                "source_discoveries"
+            ],
+            candidates_seen=values[
+                "candidates_seen"
+            ],
+            candidates_accepted=values[
+                "candidates_accepted"
+            ],
             inserted=values["inserted"],
             duplicates=values["duplicates"],
             invalid=values["invalid"],
@@ -187,8 +252,12 @@ class DomainDiscoveryFabricController:
             completed=values["completed"],
             failed=values["failed"],
             retried=values["retried"],
-            recovered_leases=values["recovered_leases"],
-            activation_failures=values["activation_failures"],
+            recovered_leases=values[
+                "recovered_leases"
+            ],
+            activation_failures=values[
+                "activation_failures"
+            ],
         )
 
     # ============================================================
@@ -198,32 +267,56 @@ class DomainDiscoveryFabricController:
     @staticmethod
     def _record_from_candidate(
         candidate: DomainCandidate,
-    ) -> Optional[DomainDiscoveryRecord]:
-        if not isinstance(candidate, DomainCandidate):
+    ) -> Optional[
+        DomainDiscoveryRecord
+    ]:
+        if not isinstance(
+            candidate,
+            DomainCandidate,
+        ):
             return None
 
         hostname = candidate.hostname
         url = candidate.url
         source = candidate.source
 
-        if not isinstance(hostname, str) or not hostname.strip():
+        if (
+            not isinstance(hostname, str)
+            or not hostname.strip()
+        ):
             return None
 
-        if not isinstance(url, str) or not url.strip():
+        if (
+            not isinstance(url, str)
+            or not url.strip()
+        ):
             return None
 
-        if not isinstance(source, str) or not source.strip():
+        if (
+            not isinstance(source, str)
+            or not source.strip()
+        ):
             return None
 
         return DomainDiscoveryRecord(
-            hostname=hostname.strip().lower().rstrip("."),
+            hostname=(
+                hostname
+                .strip()
+                .lower()
+                .rstrip(".")
+            ),
             url=url.strip(),
             source=source.strip(),
             evidence=candidate.evidence,
-            discovered_at=candidate.discovered_at,
+            discovered_at=(
+                candidate.discovered_at
+            ),
             metadata=(
                 dict(candidate.metadata)
-                if isinstance(candidate.metadata, dict)
+                if isinstance(
+                    candidate.metadata,
+                    dict,
+                )
                 else {}
             ),
         )
@@ -236,12 +329,6 @@ class DomainDiscoveryFabricController:
         self,
         context: DomainDiscoveryContext,
     ) -> dict[str, int]:
-        """
-        Discover candidates for one context and directly enqueue them
-        into the distributed domain fabric.
-
-        DomainCandidateStore is intentionally bypassed.
-        """
         if not isinstance(
             context,
             DomainDiscoveryContext,
@@ -250,18 +337,24 @@ class DomainDiscoveryFabricController:
                 "context must be DomainDiscoveryContext"
             )
 
-        candidates = self.registry.discover(context)
+        candidates = self.registry.discover(
+            context
+        )
 
         self._increment(
             "source_discoveries"
         )
+
         self._increment(
             "candidates_seen",
             len(candidates),
         )
 
-        accepted = self.candidate_pipeline.process_many_for_fabric(
-            candidates
+        accepted = (
+            self.candidate_pipeline
+            .process_many_for_fabric(
+                candidates
+            )
         )
 
         self._increment(
@@ -272,8 +365,10 @@ class DomainDiscoveryFabricController:
         records = []
 
         for candidate in accepted:
-            record = self._record_from_candidate(
-                candidate
+            record = (
+                self._record_from_candidate(
+                    candidate
+                )
             )
 
             if record is not None:
@@ -287,40 +382,47 @@ class DomainDiscoveryFabricController:
             "inserted",
             result["inserted"],
         )
+
         self._increment(
             "duplicates",
             result["duplicates"],
         )
+
+        invalid_count = (
+            result["invalid"]
+            + (
+                len(accepted)
+                - len(records)
+            )
+        )
+
         self._increment(
             "invalid",
-            result["invalid"]
-            + (len(accepted) - len(records)),
+            invalid_count,
         )
 
         return {
             "discovered": len(candidates),
             "accepted": len(accepted),
             "records": len(records),
-            "inserted": result["inserted"],
-            "duplicates": result["duplicates"],
-            "invalid": (
-                result["invalid"]
-                + (len(accepted) - len(records))
-            ),
+            "inserted": result[
+                "inserted"
+            ],
+            "duplicates": result[
+                "duplicates"
+            ],
+            "invalid": invalid_count,
         }
 
     def discover_contexts(
         self,
-        contexts: Iterable[DomainDiscoveryContext],
+        contexts: Iterable[
+            DomainDiscoveryContext
+        ],
     ) -> dict[str, int]:
-        """
-        Bounded parallel discovery ingestion.
-
-        Source-level registry execution remains responsible for
-        adaptive source control; this controller prevents an
-        unbounded number of discovery contexts from being launched.
-        """
-        context_list = list(contexts)
+        context_list = list(
+            contexts
+        )
 
         if not context_list:
             return {
@@ -356,7 +458,9 @@ class DomainDiscoveryFabricController:
 
         with ThreadPoolExecutor(
             max_workers=worker_count,
-            thread_name_prefix="domain-discovery",
+            thread_name_prefix=(
+                "domain-discovery"
+            ),
         ) as executor:
             futures = [
                 executor.submit(
@@ -366,7 +470,9 @@ class DomainDiscoveryFabricController:
                 for context in context_list
             ]
 
-            for future in as_completed(futures):
+            for future in as_completed(
+                futures
+            ):
                 try:
                     result = future.result()
                 except Exception:
@@ -381,31 +487,20 @@ class DomainDiscoveryFabricController:
                     "duplicates",
                     "invalid",
                 ):
-                    totals[key] += result[key]
+                    totals[key] += result[
+                        key
+                    ]
 
         return totals
 
     # ============================================================
-    # Durable shard processing
+    # Activation
     # ============================================================
 
     def _activate(
         self,
         item: ClaimedDomainDiscovery,
     ) -> bool:
-        """
-        Activate a claimed domain.
-
-        The callback receives:
-
-            hostname
-            url
-            priority
-            source
-
-        and is expected to place the domain's first URL into the
-        normal crawler workload.
-        """
         if self.activation_callback is None:
             return True
 
@@ -413,24 +508,167 @@ class DomainDiscoveryFabricController:
             self.activation_callback(
                 item.hostname,
                 item.url,
-                int(round(item.priority)),
+                int(
+                    round(
+                        item.priority
+                    )
+                ),
                 item.source,
             )
         )
+
+    # ============================================================
+    # Placement-aware work discovery
+    # ============================================================
+
+    def _discover_work_shards(
+        self,
+    ) -> list[int]:
+        """
+        Ask the durable fabric for physical buckets that currently
+        contain executable work.
+
+        No global physical-topology enumeration occurs here.
+        """
+
+        try:
+            shards = (
+                self.fabric.shards_with_work()
+            )
+        except Exception:
+            return []
+
+        result = []
+
+        for shard_id in shards:
+            try:
+                shard_id = int(
+                    shard_id
+                )
+            except (
+                TypeError,
+                ValueError,
+            ):
+                continue
+
+            if (
+                0
+                <= shard_id
+                < self.fabric.shard_count
+            ):
+                result.append(
+                    shard_id
+                )
+
+        return sorted(
+            set(result)
+        )
+
+    def _partition_work(
+        self,
+        shard_ids: list[int],
+    ) -> list[list[int]]:
+        """
+        Divide currently visible work across execution workers.
+
+        The worker pool is bounded by execution capacity, not by the
+        total number of physical buckets.
+
+        Deterministic ordering prevents repeatedly preferring one
+        subset of physical buckets.
+        """
+
+        if not shard_ids:
+            return []
+
+        worker_count = min(
+            self.domain_workers,
+            len(shard_ids),
+        )
+
+        groups = [
+            []
+            for _ in range(worker_count)
+        ]
+
+        for index, shard_id in enumerate(
+            shard_ids
+        ):
+            groups[
+                index % worker_count
+            ].append(
+                shard_id
+            )
+
+        return [
+            group
+            for group in groups
+            if group
+        ]
+
+    # ============================================================
+    # Worker execution
+    # ============================================================
+
+    def _worker_id(
+        self,
+    ) -> str:
+        return (
+            "domain-worker-"
+            f"{uuid.uuid4().hex}"
+        )
+
+    def _process_worker_assignment(
+        self,
+        shard_ids: list[int],
+        worker_id: str,
+    ) -> dict[str, int]:
+        totals = {
+            "claimed": 0,
+            "processed": 0,
+            "completed": 0,
+            "failed": 0,
+            "retried": 0,
+        }
+
+        for shard_id in shard_ids:
+            if self._stop_event.is_set():
+                break
+
+            lease_owner = (
+                f"{worker_id}:"
+                f"{int(shard_id)}"
+            )
+
+            result = self.process_shard(
+                shard_id=shard_id,
+                lease_owner=lease_owner,
+                stop_event=self._stop_event,
+            )
+
+            for key in totals:
+                totals[key] += result.get(
+                    key,
+                    0,
+                )
+
+        return totals
 
     def process_shard(
         self,
         shard_id: int,
         lease_owner: str,
-        stop_event: Optional[threading.Event] = None,
+        stop_event: Optional[
+            threading.Event
+        ] = None,
     ) -> dict[str, int]:
         """
-        Continuously process one durable domain shard.
+        Drain currently available records from one physical placement.
 
-        A worker owns leases only for the records it successfully
-        claims. Other workers can independently operate on other
-        shards.
+        Record-level leases remain authoritative. A worker does not
+        receive permanent ownership of the physical bucket.
         """
+
         if stop_event is None:
             stop_event = self._stop_event
 
@@ -455,7 +693,9 @@ class DomainDiscoveryFabricController:
                 len(claimed),
             )
 
-            claimed_count += len(claimed)
+            claimed_count += len(
+                claimed
+            )
 
             for item in claimed:
                 if stop_event.is_set():
@@ -468,12 +708,16 @@ class DomainDiscoveryFabricController:
                     }
 
                 try:
-                    success = self._activate(item)
+                    success = self._activate(
+                        item
+                    )
 
                     if success:
-                        marked = self.fabric.mark_complete(
-                            item,
-                            lease_owner=lease_owner,
+                        marked = (
+                            self.fabric.mark_complete(
+                                item,
+                                lease_owner=lease_owner,
+                            )
                         )
 
                         if marked:
@@ -500,9 +744,11 @@ class DomainDiscoveryFabricController:
                         self._increment(
                             "failed"
                         )
+
                         self._increment(
                             "retried"
                         )
+
                         self._increment(
                             "activation_failures"
                         )
@@ -524,9 +770,11 @@ class DomainDiscoveryFabricController:
                     self._increment(
                         "failed"
                     )
+
                     self._increment(
                         "retried"
                     )
+
                     self._increment(
                         "activation_failures"
                     )
@@ -541,16 +789,28 @@ class DomainDiscoveryFabricController:
             "retried": retried,
         }
 
+    # ============================================================
+    # Global work scheduler
+    # ============================================================
+
     def process_available(
         self,
         max_rounds: int = 1,
     ) -> dict[str, int]:
         """
-        Process available work across all durable shards using
-        bounded parallel workers.
+        Work-conserving placement-aware scheduler.
 
-        Shard count and worker count remain independent.
+        It discovers only currently work-bearing physical placements,
+        divides them among a bounded worker pool, and lets each worker
+        acquire record-level leases.
+
+        Worker count therefore remains independent of:
+            - logical partition count
+            - physical bucket count
+            - total domain count
+            - total URL count
         """
+
         max_rounds = max(
             1,
             int(max_rounds),
@@ -564,60 +824,68 @@ class DomainDiscoveryFabricController:
             "retried": 0,
         }
 
-        worker_count = min(
-            self.domain_workers,
-            self.fabric.shard_count,
-        )
-
         for _ in range(max_rounds):
             if self._stop_event.is_set():
                 break
 
-            jobs = []
+            shard_ids = (
+                self._discover_work_shards()
+            )
 
-            for shard_id in range(
-                self.fabric.shard_count
-            ):
-                lease_owner = (
-                    f"domain-worker-"
-                    f"{uuid.uuid4().hex}"
+            if not shard_ids:
+                break
+
+            assignments = (
+                self._partition_work(
+                    shard_ids
                 )
+            )
 
-                jobs.append(
-                    (
-                        shard_id,
-                        lease_owner,
-                    )
-                )
-
-            round_processed = 0
+            if not assignments:
+                break
 
             with ThreadPoolExecutor(
-                max_workers=worker_count,
-                thread_name_prefix="domain-fabric-worker",
+                max_workers=min(
+                    self.domain_workers,
+                    len(assignments),
+                ),
+                thread_name_prefix=(
+                    "domain-fabric-worker"
+                ),
             ) as executor:
-                futures = {
-                    executor.submit(
-                        self.process_shard,
-                        shard_id,
-                        lease_owner,
-                    ): shard_id
-                    for shard_id, lease_owner in jobs
-                }
+                futures = []
 
-                for future in as_completed(futures):
+                for assignment in assignments:
+                    futures.append(
+                        executor.submit(
+                            self._process_worker_assignment,
+                            assignment,
+                            self._worker_id(),
+                        )
+                    )
+
+                round_processed = 0
+
+                for future in as_completed(
+                    futures
+                ):
                     try:
                         result = future.result()
                     except Exception:
                         continue
 
                     for key in totals:
-                        if key in result:
-                            totals[key] += result[key]
+                        totals[key] += result.get(
+                            key,
+                            0,
+                        )
 
-                    round_processed += result[
-                        "processed"
-                    ]
+                    round_processed += (
+                        result.get(
+                            "processed",
+                            0,
+                        )
+                    )
 
             if round_processed == 0:
                 break
@@ -637,13 +905,16 @@ class DomainDiscoveryFabricController:
         if (
             not force
             and (
-                now - self._last_lease_recovery
+                now
+                - self._last_lease_recovery
                 < self.lease_recovery_interval
             )
         ):
             return 0
 
-        recovered = self.fabric.recover_expired_leases()
+        recovered = (
+            self.fabric.recover_expired_leases()
+        )
 
         self._last_lease_recovery = now
 
@@ -656,26 +927,24 @@ class DomainDiscoveryFabricController:
         return recovered
 
     # ============================================================
-    # Lifecycle
+    # Complete cycle
     # ============================================================
 
     def run_cycle(
         self,
         contexts: Optional[
-            Iterable[DomainDiscoveryContext]
+            Iterable[
+                DomainDiscoveryContext
+            ]
         ] = None,
     ) -> dict[str, Any]:
-        """
-        Execute one complete domain discovery cycle.
+        self._increment(
+            "cycles"
+        )
 
-        Discovery and processing are intentionally separate phases
-        so the durable fabric absorbs bursts and provides natural
-        backpressure between discovery producers and activation
-        workers.
-        """
-        self._increment("cycles")
-
-        recovered = self.recover_expired_leases()
+        recovered = (
+            self.recover_expired_leases()
+        )
 
         discovery_result = {
             "contexts": 0,
@@ -689,12 +958,16 @@ class DomainDiscoveryFabricController:
         }
 
         if contexts is not None:
-            discovery_result = self.discover_contexts(
-                contexts
+            discovery_result = (
+                self.discover_contexts(
+                    contexts
+                )
             )
 
-        processing_result = self.process_available(
-            max_rounds=1
+        processing_result = (
+            self.process_available(
+                max_rounds=1
+            )
         )
 
         return {
@@ -705,18 +978,19 @@ class DomainDiscoveryFabricController:
             "metrics": self.metrics(),
         }
 
+    # ============================================================
+    # Continuous operation
+    # ============================================================
+
     def run(
         self,
         contexts: Optional[
-            Iterable[DomainDiscoveryContext]
+            Iterable[
+                DomainDiscoveryContext
+            ]
         ] = None,
         max_cycles: Optional[int] = None,
     ) -> None:
-        """
-        Continuous operation.
-
-        The fabric remains durable across process restarts.
-        """
         cycles = 0
 
         while not self._stop_event.is_set():

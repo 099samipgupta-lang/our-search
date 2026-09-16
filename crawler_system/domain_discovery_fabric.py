@@ -7,7 +7,10 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable, Iterator, Optional
+
+
+FABRIC_VERSION = "global-domain-discovery.v4"
 
 
 @dataclass(frozen=True)
@@ -36,304 +39,949 @@ class ClaimedDomainDiscovery:
 
 class DomainDiscoveryPartitioner:
     """
-    Stable hostname partitioning.
+    Stable logical partitioning.
 
-    Hostnames are canonicalized before hashing.
-    SHA-256 is used so ownership is deterministic across
-    processes, machines and Python runtimes.
+    A hostname is assigned to a logical partition using SHA-256.
+    Logical partition identity never depends on the number of physical
+    buckets or workers.
+
+    Physical placement is handled separately by DomainDiscoveryPlacementMap.
     """
 
-    def __init__(self, shard_count: int):
-        shard_count = int(shard_count)
-        if shard_count <= 0:
-            raise ValueError("shard_count must be greater than zero")
-        self.shard_count = shard_count
-
-    @staticmethod
-    def normalize_hostname(hostname: str) -> Optional[str]:
-        if not isinstance(hostname, str):
-            return None
-
-        hostname = hostname.strip().lower().rstrip(".")
-
-        if not hostname:
-            return None
-
-        return hostname
-
-    def partition(self, hostname: str) -> int:
-        hostname = self.normalize_hostname(hostname)
-
-        if hostname is None:
-            raise ValueError("hostname must be non-empty")
-
-        digest = hashlib.sha256(
-            hostname.encode("utf-8", "strict")
-        ).digest()
-
-        value = int.from_bytes(
-            digest[:8],
-            "big",
-            signed=False,
-        )
-
-        return value % self.shard_count
-
-
-class DomainDiscoveryShard:
-    """
-    Durable shard-local domain-discovery queue.
-
-    SQLite is deliberately scoped to one shard.
-    There is no global SQLite database and no global process lock.
-
-    A worker may claim work from one shard while another worker
-    independently operates on another shard.
-    """
+    DEFAULT_LOGICAL_PARTITIONS = 1_048_576
 
     def __init__(
         self,
-        shard_id: int,
-        database_path: str,
-        lease_timeout: float = 300.0,
+        shard_count: int,
+        logical_partition_count: int = DEFAULT_LOGICAL_PARTITIONS,
     ):
-        self.shard_id = int(shard_id)
-        self.database_path = str(database_path)
-        self.lease_timeout = float(lease_timeout)
+        shard_count = int(shard_count)
+        logical_partition_count = int(
+            logical_partition_count
+        )
 
-        if self.shard_id < 0:
-            raise ValueError("shard_id must be non-negative")
+        if shard_count <= 0:
+            raise ValueError(
+                "shard_count must be positive"
+            )
 
-        if self.lease_timeout <= 0:
-            raise ValueError("lease_timeout must be positive")
+        if logical_partition_count <= 0:
+            raise ValueError(
+                "logical_partition_count must be positive"
+            )
+
+        self.shard_count = shard_count
+        self.logical_partition_count = (
+            logical_partition_count
+        )
+
+    @staticmethod
+    def normalize_hostname(
+        hostname: str,
+    ) -> str:
+        return (
+            str(hostname)
+            .strip()
+            .lower()
+            .rstrip(".")
+        )
+
+    @staticmethod
+    def _digest(
+        hostname: str,
+    ) -> bytes:
+        return hashlib.sha256(
+            hostname.encode("utf-8")
+        ).digest()
+
+    def logical_partition(
+        self,
+        hostname: str,
+    ) -> int:
+        normalized = self.normalize_hostname(
+            hostname
+        )
+
+        if not normalized:
+            raise ValueError(
+                "hostname must not be empty"
+            )
+
+        digest = self._digest(normalized)
+
+        value = int.from_bytes(
+            digest[:8],
+            byteorder="big",
+            signed=False,
+        )
+
+        return (
+            value
+            % self.logical_partition_count
+        )
+
+    def partition(
+        self,
+        hostname: str,
+    ) -> int:
+        """
+        Compatibility method.
+
+        New callers should use a placement map for physical routing.
+        This method provides deterministic fallback routing only.
+        """
+
+        logical = self.logical_partition(
+            hostname
+        )
+
+        return logical % self.shard_count
+
+
+class DomainDiscoveryPlacementMap:
+    """
+    Durable logical-partition -> physical-bucket placement map.
+
+    The logical namespace and the physical storage namespace are
+    deliberately separated.
+
+    Logical partition:
+        stable identity derived only from hostname.
+
+    Physical bucket:
+        mutable placement target.
+
+    Therefore increasing physical capacity does not change the logical
+    identity of already-discovered domains.
+
+    The placement map itself is durable SQLite metadata. It is a routing
+    control-plane artifact, not the domain workload database.
+    """
+
+    DEFAULT_PLACEMENT_BUCKETS = 4096
+
+    def __init__(
+        self,
+        storage_root: str,
+        logical_partition_count: int,
+        physical_bucket_count: int,
+    ):
+        self.storage_root = str(
+            storage_root
+        ).rstrip("/")
+
+        if not self.storage_root:
+            raise ValueError(
+                "storage_root must not be empty"
+            )
+
+        self.logical_partition_count = int(
+            logical_partition_count
+        )
+
+        self.physical_bucket_count = int(
+            physical_bucket_count
+        )
+
+        if self.logical_partition_count <= 0:
+            raise ValueError(
+                "logical_partition_count must be positive"
+            )
+
+        if self.physical_bucket_count <= 0:
+            raise ValueError(
+                "physical_bucket_count must be positive"
+            )
+
+        os.makedirs(
+            self.storage_root,
+            exist_ok=True,
+        )
+
+        self.database_path = os.path.join(
+            self.storage_root,
+            "placement_map.db",
+        )
 
         self._lock = threading.RLock()
 
-        directory = os.path.dirname(
-            os.path.abspath(self.database_path)
-        )
-
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-
         self._initialize()
 
-    def _connect(self):
+    def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(
             self.database_path,
-            timeout=30.0,
+            timeout=30,
         )
 
         connection.row_factory = sqlite3.Row
 
-        connection.execute("PRAGMA journal_mode=WAL")
-        connection.execute("PRAGMA synchronous=NORMAL")
-        connection.execute("PRAGMA busy_timeout=30000")
+        connection.execute(
+            "PRAGMA journal_mode=WAL"
+        )
+
+        connection.execute(
+            "PRAGMA synchronous=NORMAL"
+        )
+
+        connection.execute(
+            "PRAGMA busy_timeout=30000"
+        )
 
         return connection
 
-    def _initialize(self):
+    def _initialize(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS placement_metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+                """
+            )
+
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS partition_placements (
+                    logical_partition INTEGER PRIMARY KEY,
+                    physical_bucket INTEGER NOT NULL,
+                    generation INTEGER NOT NULL DEFAULT 1,
+                    updated_at REAL NOT NULL
+                )
+                """
+            )
+
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_partition_placements_bucket
+                ON partition_placements(physical_bucket)
+                """
+            )
+
+            connection.commit()
+
+            self._ensure_metadata(
+                connection
+            )
+
+    def _ensure_metadata(
+        self,
+        connection: sqlite3.Connection,
+    ) -> None:
+        existing = connection.execute(
+            """
+            SELECT value
+            FROM placement_metadata
+            WHERE key = ?
+            """,
+            (
+                "logical_partition_count",
+            ),
+        ).fetchone()
+
+        if existing is None:
+            connection.execute(
+                """
+                INSERT INTO placement_metadata
+                    (key, value)
+                VALUES
+                    (?, ?)
+                """,
+                (
+                    "logical_partition_count",
+                    str(
+                        self.logical_partition_count
+                    ),
+                ),
+            )
+
+        existing = connection.execute(
+            """
+            SELECT value
+            FROM placement_metadata
+            WHERE key = ?
+            """,
+            (
+                "physical_bucket_count",
+            ),
+        ).fetchone()
+
+        if existing is None:
+            connection.execute(
+                """
+                INSERT INTO placement_metadata
+                    (key, value)
+                VALUES
+                    (?, ?)
+                """,
+                (
+                    "physical_bucket_count",
+                    str(
+                        self.physical_bucket_count
+                    ),
+                ),
+            )
+
+        connection.commit()
+
+    def _validate_logical_partition(
+        self,
+        logical_partition: int,
+    ) -> int:
+        logical_partition = int(
+            logical_partition
+        )
+
+        if not (
+            0
+            <= logical_partition
+            < self.logical_partition_count
+        ):
+            raise ValueError(
+                "logical_partition is outside the "
+                "configured logical namespace"
+            )
+
+        return logical_partition
+
+    def _validate_physical_bucket(
+        self,
+        physical_bucket: int,
+    ) -> int:
+        physical_bucket = int(
+            physical_bucket
+        )
+
+        if not (
+            0
+            <= physical_bucket
+            < self.physical_bucket_count
+        ):
+            raise ValueError(
+                "physical_bucket is outside the "
+                "configured physical namespace"
+            )
+
+        return physical_bucket
+
+    def _initial_bucket(
+        self,
+        logical_partition: int,
+    ) -> int:
+        """
+        Deterministic initial placement.
+
+        This is used only when a logical partition receives its first
+        durable placement entry.
+
+        Once persisted, the placement is authoritative and does not
+        change merely because the process restarts.
+        """
+
+        digest = hashlib.sha256(
+            str(logical_partition).encode(
+                "ascii"
+            )
+        ).digest()
+
+        value = int.from_bytes(
+            digest[:8],
+            byteorder="big",
+            signed=False,
+        )
+
+        return (
+            value
+            % self.physical_bucket_count
+        )
+
+    def get(
+        self,
+        logical_partition: int,
+    ) -> Optional[int]:
+        logical_partition = (
+            self._validate_logical_partition(
+                logical_partition
+            )
+        )
+
         with self._lock:
-            connection = self._connect()
-
-            try:
-                connection.executescript(
+            with self._connect() as connection:
+                row = connection.execute(
                     """
-                    CREATE TABLE IF NOT EXISTS domain_discovery_work (
-                        hostname TEXT PRIMARY KEY,
-                        url TEXT NOT NULL,
-                        source TEXT NOT NULL,
-                        evidence TEXT,
-                        discovered_at REAL NOT NULL,
-                        metadata_json TEXT NOT NULL DEFAULT '{}',
-                        priority REAL NOT NULL DEFAULT 50.0,
+                    SELECT physical_bucket
+                    FROM partition_placements
+                    WHERE logical_partition = ?
+                    """,
+                    (
+                        logical_partition,
+                    ),
+                ).fetchone()
 
-                        status TEXT NOT NULL DEFAULT 'queued',
+        if row is None:
+            return None
 
-                        lease_owner TEXT,
-                        leased_at REAL,
+        return int(
+            row["physical_bucket"]
+        )
 
-                        attempts INTEGER NOT NULL DEFAULT 0,
+    def get_or_create(
+        self,
+        logical_partition: int,
+    ) -> int:
+        logical_partition = (
+            self._validate_logical_partition(
+                logical_partition
+            )
+        )
 
-                        completed_at REAL,
-                        failed_at REAL,
-                        last_error TEXT
-                    );
-
-                    CREATE INDEX IF NOT EXISTS
-                        idx_domain_discovery_ready
-                    ON domain_discovery_work (
-                        status,
-                        priority DESC,
-                        discovered_at ASC,
-                        hostname ASC
-                    );
-
-                    CREATE INDEX IF NOT EXISTS
-                        idx_domain_discovery_lease
-                    ON domain_discovery_work (
-                        status,
-                        leased_at
-                    );
-
-                    CREATE INDEX IF NOT EXISTS
-                        idx_domain_discovery_source
-                    ON domain_discovery_work (
-                        source
-                    );
-
-                    CREATE INDEX IF NOT EXISTS
-                        idx_domain_discovery_priority
-                    ON domain_discovery_work (
-                        priority DESC
-                    );
+        with self._lock:
+            with self._connect() as connection:
+                row = connection.execute(
                     """
+                    SELECT physical_bucket
+                    FROM partition_placements
+                    WHERE logical_partition = ?
+                    """,
+                    (
+                        logical_partition,
+                    ),
+                ).fetchone()
+
+                if row is not None:
+                    return int(
+                        row["physical_bucket"]
+                    )
+
+                bucket = self._initial_bucket(
+                    logical_partition
+                )
+
+                now = time.time()
+
+                connection.execute(
+                    """
+                    INSERT INTO partition_placements (
+                        logical_partition,
+                        physical_bucket,
+                        generation,
+                        updated_at
+                    )
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (
+                        logical_partition,
+                        bucket,
+                        1,
+                        now,
+                    ),
                 )
 
                 connection.commit()
 
-            finally:
-                connection.close()
+                return bucket
 
-    @staticmethod
-    def _normalize_priority(priority: Any) -> float:
-        try:
-            value = float(priority)
-        except (TypeError, ValueError):
-            value = 50.0
-
-        return max(
-            0.0,
-            min(100.0, value),
+    def assign(
+        self,
+        logical_partition: int,
+        physical_bucket: int,
+    ) -> bool:
+        logical_partition = (
+            self._validate_logical_partition(
+                logical_partition
+            )
         )
 
-    @staticmethod
-    def _metadata_json(metadata: Any) -> str:
-        if not isinstance(metadata, dict):
-            metadata = {}
-
-        try:
-            return json.dumps(
-                metadata,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
+        physical_bucket = (
+            self._validate_physical_bucket(
+                physical_bucket
             )
-        except (TypeError, ValueError):
-            return "{}"
+        )
+
+        with self._lock:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT generation
+                    FROM partition_placements
+                    WHERE logical_partition = ?
+                    """,
+                    (
+                        logical_partition,
+                    ),
+                ).fetchone()
+
+                now = time.time()
+
+                if row is None:
+                    connection.execute(
+                        """
+                        INSERT INTO partition_placements (
+                            logical_partition,
+                            physical_bucket,
+                            generation,
+                            updated_at
+                        )
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (
+                            logical_partition,
+                            physical_bucket,
+                            1,
+                            now,
+                        ),
+                    )
+                else:
+                    generation = (
+                        int(row["generation"])
+                        + 1
+                    )
+
+                    connection.execute(
+                        """
+                        UPDATE partition_placements
+                        SET
+                            physical_bucket = ?,
+                            generation = ?,
+                            updated_at = ?
+                        WHERE logical_partition = ?
+                        """,
+                        (
+                            physical_bucket,
+                            generation,
+                            now,
+                            logical_partition,
+                        ),
+                    )
+
+                connection.commit()
+
+        return True
+
+    def assign_many(
+        self,
+        placements: Iterable[
+            tuple[int, int]
+        ],
+    ) -> int:
+        items = list(
+            placements
+        )
+
+        if not items:
+            return 0
+
+        with self._lock:
+            with self._connect() as connection:
+                now = time.time()
+
+                for logical_partition, physical_bucket in items:
+                    logical_partition = (
+                        self._validate_logical_partition(
+                            logical_partition
+                        )
+                    )
+
+                    physical_bucket = (
+                        self._validate_physical_bucket(
+                            physical_bucket
+                        )
+                    )
+
+                    row = connection.execute(
+                        """
+                        SELECT generation
+                        FROM partition_placements
+                        WHERE logical_partition = ?
+                        """,
+                        (
+                            logical_partition,
+                        ),
+                    ).fetchone()
+
+                    if row is None:
+                        connection.execute(
+                            """
+                            INSERT INTO partition_placements (
+                                logical_partition,
+                                physical_bucket,
+                                generation,
+                                updated_at
+                            )
+                            VALUES (?, ?, ?, ?)
+                            """,
+                            (
+                                logical_partition,
+                                physical_bucket,
+                                1,
+                                now,
+                            ),
+                        )
+                    else:
+                        generation = (
+                            int(
+                                row["generation"]
+                            )
+                            + 1
+                        )
+
+                        connection.execute(
+                            """
+                            UPDATE partition_placements
+                            SET
+                                physical_bucket = ?,
+                                generation = ?,
+                                updated_at = ?
+                            WHERE logical_partition = ?
+                            """,
+                            (
+                                physical_bucket,
+                                generation,
+                                now,
+                                logical_partition,
+                            ),
+                        )
+
+                connection.commit()
+
+        return len(items)
+
+    def physical_bucket_for_hostname(
+        self,
+        hostname: str,
+        partitioner: DomainDiscoveryPartitioner,
+    ) -> int:
+        logical_partition = (
+            partitioner.logical_partition(
+                hostname
+            )
+        )
+
+        return self.get_or_create(
+            logical_partition
+        )
+
+    def list_for_bucket(
+        self,
+        physical_bucket: int,
+    ) -> list[int]:
+        physical_bucket = (
+            self._validate_physical_bucket(
+                physical_bucket
+            )
+        )
+
+        with self._lock:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT logical_partition
+                    FROM partition_placements
+                    WHERE physical_bucket = ?
+                    ORDER BY logical_partition
+                    """,
+                    (
+                        physical_bucket,
+                    ),
+                ).fetchall()
+
+        return [
+            int(row["logical_partition"])
+            for row in rows
+        ]
+
+    def active_buckets(
+        self,
+    ) -> list[int]:
+        with self._lock:
+            with self._connect() as connection:
+                rows = connection.execute(
+                    """
+                    SELECT DISTINCT physical_bucket
+                    FROM partition_placements
+                    ORDER BY physical_bucket
+                    """
+                ).fetchall()
+
+        return [
+            int(row["physical_bucket"])
+            for row in rows
+        ]
+
+    def stats(self) -> dict[str, int]:
+        with self._lock:
+            with self._connect() as connection:
+                row = connection.execute(
+                    """
+                    SELECT
+                        COUNT(*) AS assignments,
+                        COUNT(DISTINCT physical_bucket)
+                            AS active_buckets
+                    FROM partition_placements
+                    """
+                ).fetchone()
+
+        return {
+            "logical_partition_count": (
+                self.logical_partition_count
+            ),
+            "physical_bucket_count": (
+                self.physical_bucket_count
+            ),
+            "assignments": int(
+                row["assignments"]
+            ),
+            "active_buckets": int(
+                row["active_buckets"]
+            ),
+        }
+
+
+class DomainDiscoveryShard:
+    """
+    Durable workload database for one physical bucket.
+
+    The shard ID is now a physical placement identifier rather than the
+    identity of a domain.
+    """
+
+    def __init__(
+        self,
+        database_path: str,
+        shard_id: int,
+        lease_timeout: float,
+    ):
+        self.database_path = str(
+            database_path
+        )
+
+        self.shard_id = int(
+            shard_id
+        )
+
+        self.lease_timeout = float(
+            lease_timeout
+        )
+
+        if self.shard_id < 0:
+            raise ValueError(
+                "shard_id must not be negative"
+            )
+
+        if self.lease_timeout <= 0:
+            raise ValueError(
+                "lease_timeout must be positive"
+            )
+
+        parent = os.path.dirname(
+            self.database_path
+        )
+
+        if parent:
+            os.makedirs(
+                parent,
+                exist_ok=True,
+            )
+
+        self._initialize()
+
+    def _connect(self) -> sqlite3.Connection:
+        connection = sqlite3.connect(
+            self.database_path,
+            timeout=30,
+        )
+
+        connection.row_factory = sqlite3.Row
+
+        connection.execute(
+            "PRAGMA journal_mode=WAL"
+        )
+
+        connection.execute(
+            "PRAGMA synchronous=NORMAL"
+        )
+
+        connection.execute(
+            "PRAGMA busy_timeout=30000"
+        )
+
+        return connection
+
+    def _initialize(self) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS
+                domain_discovery_work (
+                    hostname TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    evidence TEXT,
+                    discovered_at REAL NOT NULL,
+                    metadata_json TEXT,
+                    priority REAL NOT NULL DEFAULT 50.0,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    lease_owner TEXT,
+                    leased_at REAL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    completed_at REAL,
+                    failed_at REAL,
+                    last_error TEXT
+                )
+                """
+            )
+
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_domain_discovery_ready
+                ON domain_discovery_work(
+                    status,
+                    priority DESC,
+                    discovered_at
+                )
+                """
+            )
+
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_domain_discovery_lease
+                ON domain_discovery_work(
+                    status,
+                    leased_at
+                )
+                """
+            )
+
+            connection.execute(
+                """
+                CREATE INDEX IF NOT EXISTS
+                idx_domain_discovery_source
+                ON domain_discovery_work(
+                    source,
+                    status
+                )
+                """
+            )
+
+            connection.commit()
 
     @staticmethod
-    def _metadata_from_json(value: Any) -> dict[str, Any]:
-        try:
-            result = json.loads(value or "{}")
-        except (
-            TypeError,
-            ValueError,
-            json.JSONDecodeError,
-        ):
-            return {}
+    def _record_values(
+        record: DomainDiscoveryRecord,
+    ) -> tuple:
+        hostname = (
+            str(record.hostname)
+            .strip()
+            .lower()
+            .rstrip(".")
+        )
 
-        return result if isinstance(result, dict) else {}
+        url = str(
+            record.url
+        ).strip()
+
+        source = str(
+            record.source
+        ).strip()
+
+        if not hostname:
+            raise ValueError(
+                "record hostname must not be empty"
+            )
+
+        if not url:
+            raise ValueError(
+                "record url must not be empty"
+            )
+
+        if not source:
+            raise ValueError(
+                "record source must not be empty"
+            )
+
+        discovered_at = (
+            float(record.discovered_at)
+            if record.discovered_at is not None
+            else time.time()
+        )
+
+        metadata_json = json.dumps(
+            record.metadata
+            if isinstance(
+                record.metadata,
+                dict,
+            )
+            else {},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+        return (
+            hostname,
+            url,
+            source,
+            record.evidence,
+            discovered_at,
+            metadata_json,
+            float(record.priority),
+        )
 
     def enqueue_many(
         self,
-        records: Iterable[DomainDiscoveryRecord],
+        records: Iterable[
+            DomainDiscoveryRecord
+        ],
     ) -> dict[str, int]:
+        records = list(records)
+
+        if not records:
+            return {
+                "inserted": 0,
+                "duplicates": 0,
+                "invalid": 0,
+            }
 
         inserted = 0
         duplicates = 0
         invalid = 0
 
-        now = time.time()
-
-        with self._lock:
-            connection = self._connect()
-
-            try:
-                connection.execute("BEGIN IMMEDIATE")
-
-                for record in records:
-                    if not isinstance(
-                        record,
-                        DomainDiscoveryRecord,
-                    ):
-                        invalid += 1
-                        continue
-
-                    hostname = DomainDiscoveryPartitioner.normalize_hostname(
-                        record.hostname
+        with self._connect() as connection:
+            for record in records:
+                try:
+                    values = self._record_values(
+                        record
                     )
+                except Exception:
+                    invalid += 1
+                    continue
 
-                    if hostname is None:
-                        invalid += 1
-                        continue
-
-                    if (
-                        not isinstance(record.url, str)
-                        or not record.url
-                    ):
-                        invalid += 1
-                        continue
-
-                    if (
-                        not isinstance(record.source, str)
-                        or not record.source.strip()
-                    ):
-                        invalid += 1
-                        continue
-
-                    discovered_at = (
-                        now
-                        if record.discovered_at is None
-                        else float(record.discovered_at)
+                cursor = connection.execute(
+                    """
+                    INSERT OR IGNORE INTO
+                    domain_discovery_work (
+                        hostname,
+                        url,
+                        source,
+                        evidence,
+                        discovered_at,
+                        metadata_json,
+                        priority,
+                        status
                     )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 'queued')
+                    """,
+                    values,
+                )
 
-                    priority = self._normalize_priority(
-                        record.priority
-                    )
+                if cursor.rowcount == 1:
+                    inserted += 1
+                else:
+                    duplicates += 1
 
-                    cursor = connection.execute(
-                        """
-                        INSERT OR IGNORE INTO domain_discovery_work (
-                            hostname,
-                            url,
-                            source,
-                            evidence,
-                            discovered_at,
-                            metadata_json,
-                            priority,
-                            status
-                        )
-                        VALUES (
-                            ?, ?, ?, ?, ?, ?, ?, 'queued'
-                        )
-                        """,
-                        (
-                            hostname,
-                            record.url,
-                            record.source.strip(),
-                            record.evidence,
-                            discovered_at,
-                            self._metadata_json(
-                                record.metadata
-                            ),
-                            priority,
-                        ),
-                    )
-
-                    if cursor.rowcount == 1:
-                        inserted += 1
-                    else:
-                        duplicates += 1
-
-                connection.commit()
-
-            except Exception:
-                connection.rollback()
-                raise
-
-            finally:
-                connection.close()
+            connection.commit()
 
         return {
             "inserted": inserted,
@@ -345,494 +993,690 @@ class DomainDiscoveryShard:
         self,
         limit: int,
         lease_owner: str,
-        now: Optional[float] = None,
     ) -> list[ClaimedDomainDiscovery]:
-
-        limit = max(1, int(limit))
-
-        if (
-            not isinstance(lease_owner, str)
-            or not lease_owner.strip()
-        ):
-            raise ValueError(
-                "lease_owner must be non-empty"
-            )
-
-        lease_owner = lease_owner.strip()
-
-        now = (
-            time.time()
-            if now is None
-            else float(now)
+        limit = max(
+            1,
+            int(limit),
         )
 
-        claimed: list[ClaimedDomainDiscovery] = []
+        lease_owner = str(
+            lease_owner
+        )
 
-        with self._lock:
-            connection = self._connect()
+        now = time.time()
 
-            try:
-                connection.execute("BEGIN IMMEDIATE")
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM domain_discovery_work
+                WHERE status = 'queued'
+                ORDER BY
+                    priority DESC,
+                    discovered_at ASC,
+                    hostname ASC
+                LIMIT ?
+                """,
+                (
+                    limit,
+                ),
+            ).fetchall()
 
-                rows = connection.execute(
+            if not rows:
+                return []
+
+            claimed = []
+
+            for row in rows:
+                hostname = row["hostname"]
+
+                cursor = connection.execute(
                     """
-                    SELECT
-                        hostname,
-                        url,
-                        source,
-                        evidence,
-                        discovered_at,
-                        metadata_json,
-                        priority,
-                        attempts
-                    FROM domain_discovery_work
-                    WHERE status = 'queued'
-                    ORDER BY
-                        priority DESC,
-                        discovered_at ASC,
-                        hostname ASC
-                    LIMIT ?
+                    UPDATE domain_discovery_work
+                    SET
+                        status = 'processing',
+                        lease_owner = ?,
+                        leased_at = ?,
+                        attempts = attempts + 1
+                    WHERE
+                        hostname = ?
+                        AND status = 'queued'
                     """,
-                    (limit,),
-                ).fetchall()
+                    (
+                        lease_owner,
+                        now,
+                        hostname,
+                    ),
+                )
 
-                for row in rows:
-                    cursor = connection.execute(
-                        """
-                        UPDATE domain_discovery_work
-                        SET
-                            status = 'processing',
-                            lease_owner = ?,
-                            leased_at = ?,
-                            attempts = attempts + 1
-                        WHERE
-                            hostname = ?
-                            AND status = 'queued'
-                        """,
-                        (
-                            lease_owner,
-                            now,
-                            row["hostname"],
+                if cursor.rowcount != 1:
+                    continue
+
+                metadata = {}
+
+                try:
+                    decoded = json.loads(
+                        row["metadata_json"]
+                        or "{}"
+                    )
+
+                    if isinstance(
+                        decoded,
+                        dict,
+                    ):
+                        metadata = decoded
+                except Exception:
+                    metadata = {}
+
+                claimed.append(
+                    ClaimedDomainDiscovery(
+                        hostname=hostname,
+                        url=row["url"],
+                        source=row["source"],
+                        evidence=row["evidence"],
+                        discovered_at=float(
+                            row["discovered_at"]
                         ),
-                    )
-
-                    if cursor.rowcount != 1:
-                        continue
-
-                    claimed.append(
-                        ClaimedDomainDiscovery(
-                            hostname=row["hostname"],
-                            url=row["url"],
-                            source=row["source"],
-                            evidence=row["evidence"],
-                            discovered_at=float(
-                                row["discovered_at"]
-                            ),
-                            metadata=self._metadata_from_json(
-                                row["metadata_json"]
-                            ),
-                            priority=float(
-                                row["priority"]
-                            ),
-                            attempts=int(
-                                row["attempts"]
-                            ) + 1,
-                            shard_id=self.shard_id,
+                        metadata=metadata,
+                        priority=float(
+                            row["priority"]
+                        ),
+                        attempts=int(
+                            row["attempts"]
                         )
+                        + 1,
+                        shard_id=self.shard_id,
                     )
+                )
 
-                connection.commit()
-
-            except Exception:
-                connection.rollback()
-                raise
-
-            finally:
-                connection.close()
+            connection.commit()
 
         return claimed
 
     def mark_complete(
         self,
-        hostname: str,
-        lease_owner: Optional[str] = None,
-        now: Optional[float] = None,
+        item: ClaimedDomainDiscovery,
+        lease_owner: str,
     ) -> bool:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE domain_discovery_work
+                SET
+                    status = 'complete',
+                    lease_owner = NULL,
+                    leased_at = NULL,
+                    completed_at = ?,
+                    last_error = NULL
+                WHERE
+                    hostname = ?
+                    AND status = 'processing'
+                    AND lease_owner = ?
+                """,
+                (
+                    time.time(),
+                    item.hostname,
+                    lease_owner,
+                ),
+            )
 
-        hostname = (
-            DomainDiscoveryPartitioner
-            .normalize_hostname(hostname)
-        )
+            connection.commit()
 
-        if hostname is None:
-            return False
-
-        now = (
-            time.time()
-            if now is None
-            else float(now)
-        )
-
-        with self._lock:
-            connection = self._connect()
-
-            try:
-                if lease_owner is None:
-                    cursor = connection.execute(
-                        """
-                        UPDATE domain_discovery_work
-                        SET
-                            status = 'complete',
-                            completed_at = ?,
-                            lease_owner = NULL,
-                            leased_at = NULL
-                        WHERE
-                            hostname = ?
-                            AND status = 'processing'
-                        """,
-                        (now, hostname),
-                    )
-                else:
-                    cursor = connection.execute(
-                        """
-                        UPDATE domain_discovery_work
-                        SET
-                            status = 'complete',
-                            completed_at = ?,
-                            lease_owner = NULL,
-                            leased_at = NULL
-                        WHERE
-                            hostname = ?
-                            AND status = 'processing'
-                            AND lease_owner = ?
-                        """,
-                        (
-                            now,
-                            hostname,
-                            lease_owner,
-                        ),
-                    )
-
-                connection.commit()
-
-                return cursor.rowcount == 1
-
-            finally:
-                connection.close()
+        return cursor.rowcount == 1
 
     def mark_failed(
         self,
-        hostname: str,
+        item: ClaimedDomainDiscovery,
         error: str,
         retry: bool = True,
         lease_owner: Optional[str] = None,
-        now: Optional[float] = None,
     ) -> bool:
-
-        hostname = (
-            DomainDiscoveryPartitioner
-            .normalize_hostname(hostname)
-        )
-
-        if hostname is None:
-            return False
-
-        now = (
-            time.time()
-            if now is None
-            else float(now)
-        )
-
         status = (
             "queued"
             if retry
             else "failed"
         )
 
-        with self._lock:
-            connection = self._connect()
-
-            try:
-                if lease_owner is None:
-                    cursor = connection.execute(
-                        """
-                        UPDATE domain_discovery_work
-                        SET
-                            status = ?,
-                            failed_at = ?,
-                            lease_owner = NULL,
-                            leased_at = NULL,
-                            last_error = ?
-                        WHERE
-                            hostname = ?
-                            AND status = 'processing'
-                        """,
-                        (
-                            status,
-                            now,
-                            str(error),
-                            hostname,
-                        ),
-                    )
-                else:
-                    cursor = connection.execute(
-                        """
-                        UPDATE domain_discovery_work
-                        SET
-                            status = ?,
-                            failed_at = ?,
-                            lease_owner = NULL,
-                            leased_at = NULL,
-                            last_error = ?
-                        WHERE
-                            hostname = ?
-                            AND status = 'processing'
-                            AND lease_owner = ?
-                        """,
-                        (
-                            status,
-                            now,
-                            str(error),
-                            hostname,
-                            lease_owner,
-                        ),
-                    )
-
-                connection.commit()
-
-                return cursor.rowcount == 1
-
-            finally:
-                connection.close()
-
-    def recover_expired_leases(
-        self,
-        now: Optional[float] = None,
-    ) -> int:
-
-        now = (
-            time.time()
-            if now is None
-            else float(now)
-        )
-
-        cutoff = now - self.lease_timeout
-
-        with self._lock:
-            connection = self._connect()
-
-            try:
+        with self._connect() as connection:
+            if lease_owner is None:
                 cursor = connection.execute(
                     """
                     UPDATE domain_discovery_work
                     SET
-                        status = 'queued',
+                        status = ?,
                         lease_owner = NULL,
-                        leased_at = NULL
+                        leased_at = NULL,
+                        failed_at = ?,
+                        last_error = ?
                     WHERE
-                        status = 'processing'
-                        AND leased_at IS NOT NULL
-                        AND leased_at < ?
+                        hostname = ?
+                        AND status = 'processing'
                     """,
-                    (cutoff,),
+                    (
+                        status,
+                        time.time(),
+                        str(error),
+                        item.hostname,
+                    ),
+                )
+            else:
+                cursor = connection.execute(
+                    """
+                    UPDATE domain_discovery_work
+                    SET
+                        status = ?,
+                        lease_owner = NULL,
+                        leased_at = NULL,
+                        failed_at = ?,
+                        last_error = ?
+                    WHERE
+                        hostname = ?
+                        AND status = 'processing'
+                        AND lease_owner = ?
+                    """,
+                    (
+                        status,
+                        time.time(),
+                        str(error),
+                        item.hostname,
+                        lease_owner,
+                    ),
                 )
 
-                connection.commit()
+            connection.commit()
 
-                return cursor.rowcount
+        return cursor.rowcount == 1
 
-            finally:
-                connection.close()
+    def recover_expired_leases(self) -> int:
+        cutoff = (
+            time.time()
+            - self.lease_timeout
+        )
+
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE domain_discovery_work
+                SET
+                    status = 'queued',
+                    lease_owner = NULL,
+                    leased_at = NULL,
+                    last_error = COALESCE(
+                        last_error,
+                        'lease expired and recovered'
+                    )
+                WHERE
+                    status = 'processing'
+                    AND leased_at IS NOT NULL
+                    AND leased_at < ?
+                """,
+                (
+                    cutoff,
+                ),
+            )
+
+            connection.commit()
+
+        return int(
+            cursor.rowcount
+        )
 
     def count(
         self,
         status: Optional[str] = None,
     ) -> int:
-
-        with self._lock:
-            connection = self._connect()
-
-            try:
-                if status is None:
-                    row = connection.execute(
-                        """
-                        SELECT COUNT(*) AS count
-                        FROM domain_discovery_work
-                        """
-                    ).fetchone()
-                else:
-                    row = connection.execute(
-                        """
-                        SELECT COUNT(*) AS count
-                        FROM domain_discovery_work
-                        WHERE status = ?
-                        """,
-                        (status,),
-                    ).fetchone()
-
-                return int(row["count"])
-
-            finally:
-                connection.close()
-
-    def stats(self) -> dict[str, Any]:
-
-        with self._lock:
-            connection = self._connect()
-
-            try:
-                rows = connection.execute(
+        with self._connect() as connection:
+            if status is None:
+                row = connection.execute(
                     """
-                    SELECT
-                        status,
-                        COUNT(*) AS count
+                    SELECT COUNT(*)
                     FROM domain_discovery_work
-                    GROUP BY status
                     """
-                ).fetchall()
+                ).fetchone()
+            else:
+                row = connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM domain_discovery_work
+                    WHERE status = ?
+                    """,
+                    (
+                        status,
+                    ),
+                ).fetchone()
 
-                result = {
-                    "shard_id": self.shard_id,
-                    "database_path": self.database_path,
-                    "total": 0,
-                    "queued": 0,
-                    "processing": 0,
-                    "complete": 0,
-                    "failed": 0,
-                }
+        return int(
+            row[0]
+        )
 
-                for row in rows:
-                    status = row["status"]
-                    count = int(row["count"])
+    def stats(self) -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT status, COUNT(*) AS count
+                FROM domain_discovery_work
+                GROUP BY status
+                """
+            ).fetchall()
 
-                    if status in result:
-                        result[status] = count
+        result = {
+            "total": 0,
+            "queued": 0,
+            "processing": 0,
+            "complete": 0,
+            "failed": 0,
+        }
 
-                    result["total"] += count
+        for row in rows:
+            status = str(
+                row["status"]
+            )
 
-                return result
+            count = int(
+                row["count"]
+            )
 
-            finally:
-                connection.close()
+            result[status] = count
+            result["total"] += count
+
+        return result
 
 
-class DomainDiscoveryFabric:
+class _LazyShardCollection:
     """
-    Distributed durable domain-discovery fabric.
+    Compatibility collection.
 
-    Important:
-        shard_count controls durable storage ownership.
-        Worker count is independent from shard count.
-
-    Therefore many workers can process the same fabric concurrently
-    without creating one global queue lock.
+    It exposes the configured physical namespace without eagerly
+    creating every physical database.
     """
 
     def __init__(
         self,
-        storage_root: str,
-        shard_count: int = 64,
-        lease_timeout: float = 300.0,
+        fabric: "DomainDiscoveryFabric",
     ):
-        shard_count = int(shard_count)
+        self.fabric = fabric
 
-        if shard_count <= 0:
-            raise ValueError(
-                "shard_count must be greater than zero"
+    def __len__(self) -> int:
+        return self.fabric.shard_count
+
+    def __getitem__(
+        self,
+        shard_id: int,
+    ) -> DomainDiscoveryShard:
+        return self.fabric._get_shard(
+            int(shard_id)
+        )
+
+    def __iter__(
+        self,
+    ) -> Iterator[DomainDiscoveryShard]:
+        for shard_id in (
+            self.fabric.active_shard_ids()
+        ):
+            yield self.fabric._get_shard(
+                shard_id
             )
 
-        self.storage_root = str(storage_root)
-        self.shard_count = shard_count
-        self.lease_timeout = float(lease_timeout)
+
+class DomainDiscoveryFabric:
+    """
+    Durable enormous-scale domain discovery fabric.
+
+    Core separation:
+
+        HOSTNAME
+           |
+           v
+        STABLE LOGICAL PARTITION
+           |
+           v
+        DURABLE PLACEMENT MAP
+           |
+           v
+        PHYSICAL BUCKET
+           |
+           v
+        DURABLE WORK QUEUE
+
+    The hostname's logical identity is independent of physical capacity.
+
+    Physical buckets can therefore be added, retired, drained, or
+    reassigned without changing the logical partition identity.
+
+    The physical bucket count is an infrastructure parameter, not a
+    representation of the number of domains the system can discover.
+    """
+
+    VERSION = FABRIC_VERSION
+
+    DEFAULT_LOGICAL_PARTITIONS = (
+        DomainDiscoveryPartitioner.DEFAULT_LOGICAL_PARTITIONS
+    )
+
+    DEFAULT_PHYSICAL_BUCKETS = (
+        DomainDiscoveryPlacementMap.DEFAULT_PLACEMENT_BUCKETS
+    )
+
+    def __init__(
+        self,
+        storage_root: str,
+        shard_count: int = DEFAULT_PHYSICAL_BUCKETS,
+        lease_timeout: float = 300.0,
+        logical_partition_count: int = (
+            DEFAULT_LOGICAL_PARTITIONS
+        ),
+        physical_bucket_count: Optional[int] = None,
+    ):
+        self.storage_root = str(
+            storage_root
+        ).rstrip("/")
+
+        if not self.storage_root:
+            raise ValueError(
+                "storage_root must not be empty"
+            )
+
+        if physical_bucket_count is not None:
+            shard_count = int(
+                physical_bucket_count
+            )
+
+        self.shard_count = int(
+            shard_count
+        )
+
+        self.logical_partition_count = int(
+            logical_partition_count
+        )
+
+        self.lease_timeout = float(
+            lease_timeout
+        )
+
+        if self.shard_count <= 0:
+            raise ValueError(
+                "shard_count must be positive"
+            )
+
+        if self.logical_partition_count <= 0:
+            raise ValueError(
+                "logical_partition_count must be positive"
+            )
+
+        if self.lease_timeout <= 0:
+            raise ValueError(
+                "lease_timeout must be positive"
+            )
 
         os.makedirs(
             self.storage_root,
             exist_ok=True,
         )
 
-        self.partitioner = DomainDiscoveryPartitioner(
-            shard_count
+        self.partitioner = (
+            DomainDiscoveryPartitioner(
+                shard_count=self.shard_count,
+                logical_partition_count=(
+                    self.logical_partition_count
+                ),
+            )
         )
 
-        self.shards = [
-            DomainDiscoveryShard(
-                shard_id=index,
-                database_path=os.path.join(
-                    self.storage_root,
-                    f"domain_shard_{index:05d}.db",
+        self.placement_map = (
+            DomainDiscoveryPlacementMap(
+                storage_root=self.storage_root,
+                logical_partition_count=(
+                    self.logical_partition_count
                 ),
-                lease_timeout=self.lease_timeout,
+                physical_bucket_count=(
+                    self.shard_count
+                ),
             )
-            for index in range(shard_count)
-        ]
+        )
+
+        self._shards: dict[
+            int,
+            DomainDiscoveryShard,
+        ] = {}
+
+        self._shards_lock = (
+            threading.RLock()
+        )
+
+        self.shards = _LazyShardCollection(
+            self
+        )
+
+    # ============================================================
+    # Physical storage topology
+    # ============================================================
+
+    def _physical_database_path(
+        self,
+        shard_id: int,
+    ) -> str:
+        shard_id = int(
+            shard_id
+        )
+
+        if not (
+            0
+            <= shard_id
+            < self.shard_count
+        ):
+            raise ValueError(
+                "shard_id outside physical namespace"
+            )
+
+        # Hierarchical filesystem layout prevents enormous numbers of
+        # database files from being placed in one directory.
+        level_one = (
+            shard_id // 256
+        )
+
+        level_two = (
+            shard_id % 256
+        )
+
+        return os.path.join(
+            self.storage_root,
+            f"p{level_one:05d}",
+            f"bucket_{level_two:03d}.db",
+        )
+
+    def _get_shard(
+        self,
+        shard_id: int,
+    ) -> DomainDiscoveryShard:
+        shard_id = int(
+            shard_id
+        )
+
+        if not (
+            0
+            <= shard_id
+            < self.shard_count
+        ):
+            raise ValueError(
+                "shard_id outside physical namespace"
+            )
+
+        with self._shards_lock:
+            shard = self._shards.get(
+                shard_id
+            )
+
+            if shard is None:
+                shard = DomainDiscoveryShard(
+                    database_path=(
+                        self._physical_database_path(
+                            shard_id
+                        )
+                    ),
+                    shard_id=shard_id,
+                    lease_timeout=(
+                        self.lease_timeout
+                    ),
+                )
+
+                self._shards[
+                    shard_id
+                ] = shard
+
+            return shard
+
+    # ============================================================
+    # Stable routing
+    # ============================================================
+
+    def logical_partition_for_hostname(
+        self,
+        hostname: str,
+    ) -> int:
+        return self.partitioner.logical_partition(
+            hostname
+        )
 
     def shard_for_hostname(
         self,
         hostname: str,
     ) -> int:
-        return self.partitioner.partition(hostname)
+        """
+        Resolve hostname through the durable placement map.
+
+        This is the authoritative physical routing path.
+        """
+
+        return self.placement_map.physical_bucket_for_hostname(
+            hostname=hostname,
+            partitioner=self.partitioner,
+        )
+
+    def physical_bucket_for_logical_partition(
+        self,
+        logical_partition: int,
+    ) -> int:
+        return self.placement_map.get_or_create(
+            logical_partition
+        )
+
+    def place_logical_partition(
+        self,
+        logical_partition: int,
+        physical_bucket: int,
+    ) -> bool:
+        return self.placement_map.assign(
+            logical_partition,
+            physical_bucket,
+        )
+
+    # ============================================================
+    # Durable ingestion
+    # ============================================================
 
     def enqueue(
         self,
         record: DomainDiscoveryRecord,
     ) -> dict[str, int]:
-
         shard_id = self.shard_for_hostname(
             record.hostname
         )
 
-        return self.shards[shard_id].enqueue_many(
+        shard = self._get_shard(
+            shard_id
+        )
+
+        return shard.enqueue_many(
             [record]
         )
 
     def enqueue_many(
         self,
-        records: Iterable[DomainDiscoveryRecord],
+        records: Iterable[
+            DomainDiscoveryRecord
+        ],
     ) -> dict[str, int]:
+        records = list(
+            records
+        )
 
-        grouped: dict[int, list[DomainDiscoveryRecord]] = {}
+        if not records:
+            return {
+                "inserted": 0,
+                "duplicates": 0,
+                "invalid": 0,
+            }
+
+        grouped: dict[
+            int,
+            list[DomainDiscoveryRecord],
+        ] = {}
+
+        invalid = 0
 
         for record in records:
-            if not isinstance(
-                record,
-                DomainDiscoveryRecord,
-            ):
-                grouped.setdefault(-1, []).append(record)
-                continue
-
             try:
-                shard_id = self.shard_for_hostname(
-                    record.hostname
+                hostname = (
+                    str(record.hostname)
+                    .strip()
+                    .lower()
+                    .rstrip(".")
                 )
+
+                if not hostname:
+                    raise ValueError(
+                        "hostname is empty"
+                    )
+
+                shard_id = (
+                    self.shard_for_hostname(
+                        hostname
+                    )
+                )
+
+                grouped.setdefault(
+                    shard_id,
+                    [],
+                ).append(
+                    record
+                )
+
             except Exception:
-                grouped.setdefault(-1, []).append(record)
-                continue
+                invalid += 1
 
-            grouped.setdefault(
-                shard_id,
-                [],
-            ).append(record)
+        inserted = 0
+        duplicates = 0
 
-        totals = {
-            "inserted": 0,
-            "duplicates": 0,
-            "invalid": 0,
-        }
-
-        if -1 in grouped:
-            totals["invalid"] += len(
-                grouped.pop(-1)
-            )
-
-        for shard_id, shard_records in grouped.items():
-            result = self.shards[shard_id].enqueue_many(
+        for shard_id, shard_records in (
+            grouped.items()
+        ):
+            result = self._get_shard(
+                shard_id
+            ).enqueue_many(
                 shard_records
             )
 
-            for key in totals:
-                totals[key] += result[key]
+            inserted += result[
+                "inserted"
+            ]
 
-        return totals
+            duplicates += result[
+                "duplicates"
+            ]
+
+            invalid += result[
+                "invalid"
+            ]
+
+        return {
+            "inserted": inserted,
+            "duplicates": duplicates,
+            "invalid": invalid,
+        }
+
+    # ============================================================
+    # Durable claiming
+    # ============================================================
 
     def claim_many(
         self,
@@ -840,82 +1684,244 @@ class DomainDiscoveryFabric:
         limit: int,
         lease_owner: str,
     ) -> list[ClaimedDomainDiscovery]:
-
-        shard_id = int(shard_id)
-
-        if (
-            shard_id < 0
-            or shard_id >= self.shard_count
-        ):
-            raise ValueError("invalid shard_id")
-
-        return self.shards[shard_id].claim_many(
+        return self._get_shard(
+            shard_id
+        ).claim_many(
             limit=limit,
             lease_owner=lease_owner,
         )
 
-    def recover_expired_leases(self) -> int:
-        return sum(
-            shard.recover_expired_leases()
-            for shard in self.shards
-        )
+    def claim_from_many(
+        self,
+        shard_ids: Iterable[int],
+        limit_per_shard: int,
+        lease_owner_prefix: str = (
+            "domain-fabric-worker"
+        ),
+    ) -> list[ClaimedDomainDiscovery]:
+        claimed = []
+
+        for shard_id in shard_ids:
+            owner = (
+                f"{lease_owner_prefix}-"
+                f"{int(shard_id)}-"
+                f"{time.time_ns()}"
+            )
+
+            claimed.extend(
+                self.claim_many(
+                    shard_id=int(shard_id),
+                    limit=limit_per_shard,
+                    lease_owner=owner,
+                )
+            )
+
+        return claimed
+
+    # ============================================================
+    # Durable completion/failure
+    # ============================================================
 
     def mark_complete(
         self,
-        claimed: ClaimedDomainDiscovery,
-        lease_owner: Optional[str] = None,
+        item: ClaimedDomainDiscovery,
+        lease_owner: str,
     ) -> bool:
-
-        return self.shards[
-            claimed.shard_id
-        ].mark_complete(
-            claimed.hostname,
+        return self._get_shard(
+            item.shard_id
+        ).mark_complete(
+            item=item,
             lease_owner=lease_owner,
         )
 
     def mark_failed(
         self,
-        claimed: ClaimedDomainDiscovery,
+        item: ClaimedDomainDiscovery,
         error: str,
         retry: bool = True,
         lease_owner: Optional[str] = None,
     ) -> bool:
-
-        return self.shards[
-            claimed.shard_id
-        ].mark_failed(
-            claimed.hostname,
+        return self._get_shard(
+            item.shard_id
+        ).mark_failed(
+            item=item,
             error=error,
             retry=retry,
             lease_owner=lease_owner,
         )
 
-    def stats(self) -> dict[str, Any]:
+    # ============================================================
+    # Recovery
+    # ============================================================
 
-        shard_stats = [
-            shard.stats()
-            for shard in self.shards
-        ]
+    def recover_expired_leases(
+        self,
+    ) -> int:
+        recovered = 0
 
-        result = {
+        # Only instantiated buckets are touched here. The placement
+        # metadata identifies the durable physical namespace, while
+        # future deployments can use the placement catalog to discover
+        # and distribute recovery ownership without a global scan.
+        for shard_id in self.active_shard_ids():
+            try:
+                recovered += (
+                    self._get_shard(
+                        shard_id
+                    ).recover_expired_leases()
+                )
+            except Exception:
+                continue
+
+        return recovered
+
+    def recover_expired_leases_for_shards(
+        self,
+        shard_ids: Iterable[int],
+    ) -> int:
+        recovered = 0
+
+        for shard_id in shard_ids:
+            recovered += (
+                self._get_shard(
+                    int(shard_id)
+                ).recover_expired_leases()
+            )
+
+        return recovered
+
+    # ============================================================
+    # Topology/work discovery
+    # ============================================================
+
+    def active_shard_ids(
+        self,
+    ) -> list[int]:
+        with self._shards_lock:
+            return sorted(
+                self._shards.keys()
+            )
+
+    def shards_with_work(
+        self,
+    ) -> list[int]:
+        result = []
+
+        for shard_id in self.active_shard_ids():
+            try:
+                shard = self._get_shard(
+                    shard_id
+                )
+
+                if (
+                    shard.count(
+                        "queued"
+                    )
+                    > 0
+                    or shard.count(
+                        "processing"
+                    )
+                    > 0
+                ):
+                    result.append(
+                        shard_id
+                    )
+            except Exception:
+                continue
+
+        return result
+
+    def placement_stats(
+        self,
+    ) -> dict[str, int]:
+        return self.placement_map.stats()
+
+    def physical_capacity(
+        self,
+    ) -> int:
+        return self.shard_count
+
+    def logical_capacity(
+        self,
+    ) -> int:
+        return self.logical_partition_count
+
+    # ============================================================
+    # Statistics
+    # ============================================================
+
+    def stats(
+        self,
+    ) -> dict[str, Any]:
+        aggregate = {
+            "version": self.VERSION,
             "shard_count": self.shard_count,
+            "physical_bucket_count": (
+                self.shard_count
+            ),
+            "logical_partition_count": (
+                self.logical_partition_count
+            ),
             "total": 0,
             "queued": 0,
             "processing": 0,
             "complete": 0,
             "failed": 0,
+            "active_physical_shards": 0,
             "shards_with_work": 0,
-            "shards": shard_stats,
+            "placement": (
+                self.placement_map.stats()
+            ),
+            "shards": [],
         }
 
-        for shard in shard_stats:
-            result["total"] += shard["total"]
-            result["queued"] += shard["queued"]
-            result["processing"] += shard["processing"]
-            result["complete"] += shard["complete"]
-            result["failed"] += shard["failed"]
+        for shard_id in self.active_shard_ids():
+            try:
+                stats = self._get_shard(
+                    shard_id
+                ).stats()
+            except Exception:
+                continue
 
-            if shard["total"] > 0:
-                result["shards_with_work"] += 1
+            aggregate[
+                "active_physical_shards"
+            ] += 1
 
-        return result
+            if (
+                stats.get("queued", 0)
+                > 0
+                or stats.get("processing", 0)
+                > 0
+            ):
+                aggregate[
+                    "shards_with_work"
+                ] += 1
+
+            aggregate["total"] += (
+                stats.get("total", 0)
+            )
+
+            aggregate["queued"] += (
+                stats.get("queued", 0)
+            )
+
+            aggregate["processing"] += (
+                stats.get("processing", 0)
+            )
+
+            aggregate["complete"] += (
+                stats.get("complete", 0)
+            )
+
+            aggregate["failed"] += (
+                stats.get("failed", 0)
+            )
+
+            aggregate["shards"].append(
+                {
+                    "shard_id": shard_id,
+                    **stats,
+                }
+            )
+
+        return aggregate
