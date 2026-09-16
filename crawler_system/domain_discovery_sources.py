@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+import threading
 from dataclasses import dataclass
 from time import monotonic, perf_counter
 from typing import Any, Protocol
@@ -22,9 +25,9 @@ class DomainCandidate:
     """
     A domain discovered independently of the existing Web graph.
 
-    The candidate intentionally preserves provenance so later
-    stages can distinguish independently discovered domains from
-    domains discovered through links, feeds, or sitemaps.
+    The candidate preserves provenance so later stages can distinguish
+    independently discovered domains from domains discovered through
+    links, feeds, or sitemaps.
     """
 
     hostname: str
@@ -35,13 +38,6 @@ class DomainCandidate:
     metadata: dict[str, Any] | None = None
 
     def __hash__(self) -> int:
-        """
-        Hash candidates by stable identity/provenance fields.
-
-        Metadata is intentionally excluded because dictionaries
-        are unhashable and metadata is descriptive rather than
-        candidate identity.
-        """
         return hash(
             (
                 self.hostname,
@@ -76,14 +72,17 @@ class DomainDiscoverySourceRegistry:
     """
     Registry for independent new-domain discovery sources.
 
-    This registry is intentionally separate from
-    DiscoverySourceRegistry.
+    Concurrency model:
 
-    DiscoverySourceRegistry discovers URLs from already observed
-    Web resources.
+    - different discovery sources may execute concurrently;
+    - executions of the same source are serialized by that source's lock;
+    - each source's metrics/adaptive state are protected by the same
+      source lock;
+    - registration/unregistration are protected separately.
 
-    DomainDiscoverySourceRegistry discovers domain candidates
-    independently of those already observed Web resources.
+    This prevents concurrent calls from corrupting adaptive state while
+    avoiding a global discovery lock that would serialize the entire
+    domain-discovery system.
     """
 
     def __init__(
@@ -132,42 +131,63 @@ class DomainDiscoverySourceRegistry:
 
         self._sources: dict[
             str,
-            DomainDiscoverySource
+            DomainDiscoverySource,
         ] = {}
 
         self.execution_metrics: dict[
             str,
-            dict[str, Any]
+            dict[str, Any],
         ] = {}
 
         self.adaptive_control: dict[
             str,
-            dict[str, Any]
+            dict[str, Any],
         ] = {}
+
+        self._source_locks: dict[
+            str,
+            threading.RLock,
+        ] = {}
+
+        self._registry_lock = threading.RLock()
 
         self.max_failure_rate = max_failure_rate
         self.degraded_failure_rate = degraded_failure_rate
-
-        # Kept under this public name for consistency with the
-        # existing discovery-source architecture.
-        #
-        # Adaptive control treats this as the latency threshold
-        # for an individual successful execution.
         self.max_average_latency_seconds = (
             max_average_latency_seconds
         )
-
         self.adaptive_failure_threshold = (
             adaptive_failure_threshold
         )
-
         self.adaptive_latency_threshold = (
             adaptive_latency_threshold
         )
-
         self.adaptive_cooldown_seconds = (
             adaptive_cooldown_seconds
         )
+
+    # ============================================================
+    # LOCKING
+    # ============================================================
+
+    def _source_lock_for(
+        self,
+        name: str,
+    ) -> threading.RLock:
+        with self._registry_lock:
+            lock = self._source_locks.get(name)
+
+            if lock is None:
+                lock = threading.RLock()
+                self._source_locks[name] = lock
+
+            return lock
+
+    def _source_snapshot(
+        self,
+    ) -> tuple[DomainDiscoverySource, ...]:
+        with self._registry_lock:
+            return tuple(self._sources.values())
 
     # ============================================================
     # METRICS
@@ -186,12 +206,10 @@ class DomainDiscoverySourceRegistry:
                 "items_produced": 0,
                 "successful_executions": 0,
                 "empty_results": 0,
-
                 "total_latency_seconds": 0.0,
                 "average_latency_seconds": 0.0,
                 "min_latency_seconds": None,
                 "max_latency_seconds": None,
-
                 "failure_rate": 0.0,
                 "success_rate": 0.0,
                 "health": "healthy",
@@ -254,8 +272,8 @@ class DomainDiscoverySourceRegistry:
             metrics["failure_rate"] = 0.0
             metrics["success_rate"] = 0.0
 
-        metrics["health"] = (
-            self._calculate_health(metrics)
+        metrics["health"] = self._calculate_health(
+            metrics
         )
 
     @staticmethod
@@ -358,7 +376,6 @@ class DomainDiscoverySourceRegistry:
             state["control_reason"] = (
                 "recovery_probe_failed"
             )
-
             return
 
         if (
@@ -396,7 +413,6 @@ class DomainDiscoverySourceRegistry:
             state["control_reason"] = (
                 "cooldown_expired"
             )
-
             return True
 
         return False
@@ -405,12 +421,15 @@ class DomainDiscoverySourceRegistry:
         self,
         name: str,
     ) -> dict[str, Any] | None:
-        state = self.adaptive_control.get(name)
+        lock = self._source_lock_for(name)
 
-        if state is None:
-            return None
+        with lock:
+            state = self.adaptive_control.get(name)
 
-        return dict(state)
+            if state is None:
+                return None
+
+            return dict(state)
 
     # ============================================================
     # REGISTRATION
@@ -433,16 +452,20 @@ class DomainDiscoverySourceRegistry:
 
         name = name.strip()
 
-        if name in self._sources:
-            raise ValueError(
-                "Domain discovery source already "
-                f"registered: {name}"
+        with self._registry_lock:
+            if name in self._sources:
+                raise ValueError(
+                    "Domain discovery source already "
+                    f"registered: {name}"
+                )
+
+            self._sources[name] = source
+            self._source_locks[name] = (
+                threading.RLock()
             )
 
-        self._sources[name] = source
-
-        self._metrics_for(name)
-        self._adaptive_state_for(name)
+            self._metrics_for(name)
+            self._adaptive_state_for(name)
 
     def unregister(
         self,
@@ -451,23 +474,29 @@ class DomainDiscoverySourceRegistry:
         if not isinstance(name, str):
             return False
 
-        removed = (
-            self._sources.pop(name, None)
-            is not None
-        )
-
-        if removed:
-            self.execution_metrics.pop(
-                name,
-                None
+        with self._registry_lock:
+            removed = (
+                self._sources.pop(name, None)
+                is not None
             )
 
-            self.adaptive_control.pop(
-                name,
-                None
-            )
+            if removed:
+                self.execution_metrics.pop(
+                    name,
+                    None,
+                )
 
-        return removed
+                self.adaptive_control.pop(
+                    name,
+                    None,
+                )
+
+                self._source_locks.pop(
+                    name,
+                    None,
+                )
+
+            return removed
 
     def get(
         self,
@@ -476,46 +505,39 @@ class DomainDiscoverySourceRegistry:
         if not isinstance(name, str):
             return None
 
-        return self._sources.get(name)
+        with self._registry_lock:
+            return self._sources.get(name)
 
     def names(self) -> tuple[str, ...]:
-        return tuple(self._sources.keys())
+        with self._registry_lock:
+            return tuple(self._sources.keys())
 
     # ============================================================
-    # DISCOVERY
+    # SOURCE EXECUTION
     # ============================================================
 
-    def discover(
+    def _discover_source(
         self,
-        context: DomainDiscoveryContext | None = None,
+        source: DomainDiscoverySource,
+        context: DomainDiscoveryContext,
     ) -> set[DomainCandidate]:
-        if context is None:
-            context = DomainDiscoveryContext()
+        name = getattr(
+            source,
+            "name",
+            "unknown",
+        )
 
-        results: set[DomainCandidate] = set()
+        lock = self._source_lock_for(name)
 
-        for source in self._sources.values():
-
-            name = getattr(
-                source,
-                "name",
-                "unknown",
-            )
-
+        with lock:
             metrics = self._metrics_for(name)
-
-            # ----------------------------------------------------
-            # Adaptive source control
-            # ----------------------------------------------------
 
             if not self._adaptive_should_execute(name):
                 metrics["skipped"] += 1
-
                 self._update_health_metrics(
                     metrics
                 )
-
-                continue
+                return set()
 
             try:
                 can_discover = getattr(
@@ -527,12 +549,10 @@ class DomainDiscoverySourceRegistry:
                 if can_discover is not None:
                     if not can_discover(context):
                         metrics["skipped"] += 1
-
                         self._update_health_metrics(
                             metrics
                         )
-
-                        continue
+                        return set()
 
                 metrics["executions"] += 1
 
@@ -563,7 +583,7 @@ class DomainDiscoverySourceRegistry:
                     metrics
                 )
 
-                continue
+                return set()
 
             metrics["successful_executions"] += 1
 
@@ -574,13 +594,12 @@ class DomainDiscoverySourceRegistry:
 
             if not discovered:
                 metrics["empty_results"] += 1
-
                 self._update_health_metrics(
                     metrics
                 )
+                return set()
 
-                continue
-
+            results: set[DomainCandidate] = set()
             produced = 0
 
             for item in discovered:
@@ -600,24 +619,58 @@ class DomainDiscoverySourceRegistry:
                 metrics
             )
 
+            return results
+
+    # ============================================================
+    # DISCOVERY
+    # ============================================================
+
+    def discover(
+        self,
+        context: DomainDiscoveryContext | None = None,
+    ) -> set[DomainCandidate]:
+        if context is None:
+            context = DomainDiscoveryContext()
+
+        sources = self._source_snapshot()
+
+        results: set[DomainCandidate] = set()
+
+        for source in sources:
+            results.update(
+                self._discover_source(
+                    source,
+                    context,
+                )
+            )
+
         return results
+
+    # ============================================================
+    # METRICS API
+    # ============================================================
 
     def metrics(
         self,
         name: str | None = None,
     ):
-        if name is None:
-            return {
-                source_name: dict(source_metrics)
-                for source_name, source_metrics
-                in self.execution_metrics.items()
-            }
+        with self._registry_lock:
+            if name is None:
+                return {
+                    source_name: dict(
+                        source_metrics
+                    )
+                    for (
+                        source_name,
+                        source_metrics,
+                    ) in self.execution_metrics.items()
+                }
 
-        source_metrics = self.execution_metrics.get(
-            name
-        )
+            source_metrics = (
+                self.execution_metrics.get(name)
+            )
 
-        if source_metrics is None:
-            return None
+            if source_metrics is None:
+                return None
 
-        return dict(source_metrics)
+            return dict(source_metrics)

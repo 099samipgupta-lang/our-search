@@ -358,6 +358,70 @@ class DomainCandidatePipeline:
 
         return normalized
 
+    def process_many_for_fabric(self, candidates):
+        """
+        Normalize and validate candidates for the distributed
+        domain-discovery fabric.
+
+        Important:
+            This method intentionally does NOT use the local
+            DomainCandidateDeduplicator.
+
+        Durable cross-cycle and cross-worker deduplication belongs
+        to DomainDiscoveryFabric, where canonical hostnames are
+        routed to their durable shard.
+
+        Candidate selection for multiple reports of the same
+        hostname remains deterministic and is performed before
+        returning the candidates.
+        """
+        if candidates is None:
+            return set()
+
+        normalized_candidates = []
+
+        for candidate in candidates:
+            normalized = (
+                self.normalizer.normalize_candidate(
+                    candidate
+                )
+            )
+
+            if normalized is None:
+                continue
+
+            if not self.validator.validate(
+                normalized
+            ):
+                continue
+
+            normalized_candidates.append(
+                normalized
+            )
+
+        grouped = {}
+
+        for candidate in normalized_candidates:
+            hostname = candidate.hostname
+
+            existing = grouped.get(hostname)
+
+            if existing is None:
+                grouped[hostname] = candidate
+                continue
+
+            if self._candidate_rank(
+                candidate
+            ) > self._candidate_rank(existing):
+                grouped[hostname] = candidate
+
+        accepted = set()
+
+        for hostname in sorted(grouped):
+            accepted.add(grouped[hostname])
+
+        return accepted
+
     def process_many(self, candidates):
         if candidates is None:
             return set()
