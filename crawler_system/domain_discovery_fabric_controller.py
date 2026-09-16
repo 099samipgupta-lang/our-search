@@ -472,7 +472,7 @@ class DomainDiscoveryFabricController:
 
                     if success:
                         marked = self.fabric.mark_complete(
-                            item.hostname,
+                            item,
                             lease_owner=lease_owner,
                         )
 
@@ -488,7 +488,7 @@ class DomainDiscoveryFabricController:
                             )
                     else:
                         self.fabric.mark_failed(
-                            item.hostname,
+                            item,
                             "domain activation returned false",
                             retry=True,
                             lease_owner=lease_owner,
@@ -510,7 +510,7 @@ class DomainDiscoveryFabricController:
                 except Exception as exc:
                     try:
                         self.fabric.mark_failed(
-                            item.hostname,
+                            item,
                             repr(exc),
                             retry=True,
                             lease_owner=lease_owner,

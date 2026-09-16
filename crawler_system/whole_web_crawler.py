@@ -27,6 +27,9 @@ from crawler_system.url_state import URLStateStore
 from indexing_pipeline.crawler_bridge import CrawlerIndexBridge
 from indexing_pipeline.remote_bridge import RemoteCrawlerIndexBridge
 from indexing_pipeline.automatic import AutomaticCrawlerIndexer
+from crawler_system.domain_discovery_sources import DomainDiscoverySourceRegistry
+from crawler_system.global_web_discovery_integration import GlobalWebDiscoveryIntegration
+from crawler_system.certificate_transparency_domain_source import CertificateTransparencyDomainSource
 
 
 class WholeWebCrawler:
@@ -247,6 +250,39 @@ class WholeWebCrawler:
 
         self.seeds = set()
 
+        # ---------------------------------------------------------
+        # Global Web Discovery & Coverage Integration
+        #
+        # Independent domain discovery feeds the existing crawler
+        # through _add_url(). The durable domain fabric remains
+        # independent from the legacy expansion queue.
+        # ---------------------------------------------------------
+
+        self.domain_discovery_sources = (
+            DomainDiscoverySourceRegistry()
+        )
+
+        self.domain_discovery_sources.register(
+            CertificateTransparencyDomainSource()
+        )
+
+        self.global_web_discovery = (
+            GlobalWebDiscoveryIntegration(
+                crawler=self,
+                storage_root=storage_root,
+                registry=self.domain_discovery_sources,
+                shard_count=64,
+                lease_timeout=300.0,
+                discovery_workers=8,
+                domain_workers=32,
+                claim_batch_size=100,
+                lease_recovery_interval=30.0,
+                cycle_interval=5.0,
+                max_contexts_per_cycle=100,
+                worker_idle_sleep=0.25,
+            )
+        )
+
         self.running = False
 
         self.stats = {
@@ -274,7 +310,8 @@ class WholeWebCrawler:
             "stage10_index_flushes": 0,
             "stage10_lease_recoveries": 0,
             "stage10_runtime_errors": 0,
-            "stage10_last_persisted_at": None
+            "stage10_last_persisted_at": None,
+            "global_discovery_errors": 0
         }
 
     # =============================================================
@@ -1209,6 +1246,33 @@ class WholeWebCrawler:
                 limit=100
             )
 
+            # ---------------------------------------------------------
+            # Global Web Discovery & Coverage
+            #
+            # Independent domain discovery is scheduled separately
+            # from the fast URL-fetch loop. Newly discovered domains
+            # enter the same production URL ingestion seam.
+            # ---------------------------------------------------------
+
+            global_discovery = getattr(
+                self,
+                "global_web_discovery",
+                None
+            )
+
+            if global_discovery is not None:
+                try:
+                    global_discovery.cycle()
+                except Exception:
+                    self.stats[
+                        "global_discovery_errors"
+                    ] = (
+                        self.stats.get(
+                            "global_discovery_errors",
+                            0
+                        ) + 1
+                    )
+
             self.expansion_controller.run_cycle()
 
             self.coordinator.dispatch()
@@ -1225,11 +1289,27 @@ class WholeWebCrawler:
                     result
                 )
 
+            global_pending = False
+
+            if global_discovery is not None:
+                try:
+                    fabric_stats = (
+                        global_discovery.fabric.stats()
+                    )
+
+                    global_pending = (
+                        fabric_stats.get("queued", 0) > 0
+                        or fabric_stats.get("processing", 0) > 0
+                    )
+                except Exception:
+                    global_pending = False
+
             if (
                 self.frontier.size() == 0
                 and not self.coordinator.in_flight
                 and self.expansion_queue.count("queued") == 0
                 and self.expansion_queue.count("processing") == 0
+                and not global_pending
             ):
 
                 break
