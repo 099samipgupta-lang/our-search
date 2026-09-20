@@ -245,6 +245,40 @@ class CrawlFrontier:
 
         return len(self.leased_entries)
 
+    def get_next_batch(self, limit):
+        """Claim up to ``limit`` URLs from the durable frontier."""
+
+        if limit <= 0:
+            return []
+
+        if self.state_store is not None:
+            results = self.state_store.claim_next_batch(
+                owner=self.owner,
+                limit=limit,
+                now=time.time(),
+            )
+
+            urls = []
+
+            for result in results:
+                self.leased_entries[result["url"]] = result
+                urls.append(result["url"])
+
+            return urls
+
+        # Legacy fallback.
+        urls = []
+
+        for _ in range(limit):
+            url = self.get_next()
+
+            if url is None:
+                break
+
+            urls.append(url)
+
+        return urls
+
     def get_next(self):
         if self.state_store is not None:
             return self._sqlite_get_next()

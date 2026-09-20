@@ -21,6 +21,7 @@ from crawler_system.feed_discovery_source import FeedDiscoverySource
 from crawler_system.feed_endpoint_discovery_source import FeedEndpointDiscoverySource
 from crawler_system.storage import CrawlStorage
 from crawler_system.frontier import CrawlFrontier
+from crawler_system.partitioned_frontier import PartitionedFrontier
 from crawler_system.state_storage import CrawlerStateStorage
 from crawler_system.url_state import URLStateStore
 
@@ -30,6 +31,7 @@ from indexing_pipeline.automatic import AutomaticCrawlerIndexer
 from crawler_system.domain_discovery_sources import DomainDiscoverySourceRegistry
 from crawler_system.global_web_discovery_integration import GlobalWebDiscoveryIntegration
 from crawler_system.certificate_transparency_domain_source import CertificateTransparencyDomainSource
+from crawler_system.common_crawl_domain_source import CommonCrawlURLIndexSource
 
 
 class WholeWebCrawler:
@@ -211,15 +213,13 @@ class WholeWebCrawler:
         # Frontier
         # ---------------------------------------------------------
 
-        frontier_storage_path = (
-            f"{storage_root.rstrip('/')}/frontier/state.json"
-        )
-
-        self.frontier = CrawlFrontier(
+        self.frontier = PartitionedFrontier(
+            partition_count=256,
             default_delay=frontier_delay,
             max_retries=max_attempts,
-            storage_path=frontier_storage_path,
-            state_store=self.url_state
+            storage_root=(
+                f"{storage_root.rstrip('/')}/partitions"
+            ),
         )
 
         # ---------------------------------------------------------
@@ -265,6 +265,21 @@ class WholeWebCrawler:
         self.domain_discovery_sources.register(
             CertificateTransparencyDomainSource()
         )
+
+        self.domain_discovery_sources.register(
+            CommonCrawlURLIndexSource(
+                crawl="CC-MAIN-2025-51",
+                subset="warc",
+                max_candidates=1000,
+                max_per_domain=25,
+                worker_id="whole-web-crawler",
+            )
+        )
+
+        # Global public-Web acquisition is enabled through the
+        # existing domain-discovery fabric. Newly discovered
+        # domains are activated into the crawler frontier and
+        # crawled by the existing worker infrastructure.
 
         self.global_web_discovery = (
             GlobalWebDiscoveryIntegration(
@@ -1263,7 +1278,7 @@ class WholeWebCrawler:
             if global_discovery is not None:
                 try:
                     global_discovery.cycle()
-                except Exception:
+                except Exception as exc:
                     self.stats[
                         "global_discovery_errors"
                     ] = (
@@ -1271,6 +1286,12 @@ class WholeWebCrawler:
                             "global_discovery_errors",
                             0
                         ) + 1
+                    )
+                    print(
+                        "GLOBAL_DISCOVERY_ERROR:",
+                        type(exc).__name__,
+                        str(exc),
+                        flush=True,
                     )
 
             self.expansion_controller.run_cycle()
@@ -1305,14 +1326,13 @@ class WholeWebCrawler:
                     global_pending = False
 
             if (
-                self.frontier.size() == 0
-                and not self.coordinator.in_flight
-                and self.expansion_queue.count("queued") == 0
-                and self.expansion_queue.count("processing") == 0
-                and not global_pending
+               self.frontier.size() == 0
+               and not self.coordinator.in_flight
+               and self.expansion_queue.count("queued") == 0
+               and self.expansion_queue.count("processing") == 0
+               and not global_pending
             ):
-
-                break
+               break
 
         integration = getattr(
             self,

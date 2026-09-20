@@ -23,7 +23,16 @@ class InvertedIndex:
     def add_document(
         self,
         document_id,
-        text
+        text=None,
+        title=None,
+        url=None,
+        domain=None,
+        canonical_url=None,
+        headings=None,
+        navigation=None,
+        footer=None,
+        sidebar=None,
+        anchor_text=None,
     ):
 
         if document_id in self.documents:
@@ -32,20 +41,81 @@ class InvertedIndex:
                 document_id
             )
 
-        positions = (
-            self.tokenizer
-            .tokenize_with_positions(text)
-        )
+        # Field-aware indexing.
+        # Preserve the original combined-text behavior when only `text`
+        # is supplied, while allowing title/URL/body-specific postings.
+        if (
+            title is not None
+            or url is not None
+            or domain is not None
+            or canonical_url is not None
+        ):
+            fields = [
+                ("title", title or ""),
+                ("url", url or ""),
+                ("domain", domain or ""),
+                ("body", text or ""),
+                ("canonical_url", canonical_url or ""),
+                ("headings", headings or ""),
+                ("navigation", navigation or ""),
+                ("footer", footer or ""),
+                ("sidebar", sidebar or ""),
+                ("anchor_text", anchor_text or ""),
+            ]
 
-        term_positions = defaultdict(list)
+            positions = []
+            field_positions = {}
 
-        for item in positions:
+            global_position = 0
 
-            term_positions[
-                item["term"]
-            ].append(
-                item["position"]
+            for field_name, field_text in fields:
+                field_tokens = (
+                    self.tokenizer
+                    .tokenize_with_positions(field_text)
+                )
+
+                field_positions[field_name] = {}
+
+                for item in field_tokens:
+                    term = item["term"]
+                    position = global_position + item["position"]
+
+                    field_positions[field_name].setdefault(
+                        term,
+                        []
+                    ).append(position)
+
+                    positions.append({
+                        "term": term,
+                        "position": position,
+                        "field": field_name,
+                    })
+
+                global_position += len(field_tokens)
+
+            term_positions = defaultdict(list)
+
+            for item in positions:
+                term_positions[
+                    item["term"]
+                ].append(
+                    item["position"]
+                )
+        else:
+            positions = (
+                self.tokenizer
+                .tokenize_with_positions(text or "")
             )
+
+            term_positions = defaultdict(list)
+
+            for item in positions:
+                term_positions[
+                    item["term"]
+                ].append(
+                    item["position"]
+                )
+            field_positions = {}
 
         for term, term_positions_list in (
             term_positions.items()
@@ -64,7 +134,10 @@ class InvertedIndex:
                 len(positions),
 
             "terms":
-                len(term_positions)
+                len(term_positions),
+
+            "fields":
+                field_positions,
         }
 
     def remove_document(

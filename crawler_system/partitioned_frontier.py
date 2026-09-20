@@ -140,13 +140,26 @@ class PartitionedFrontier:
         """
 
         with self._lock:
-            for partition_id in range(self.partition_count):
+            start = self._next_partition
+
+            for offset in range(self.partition_count):
+                partition_id = (
+                    start + offset
+                ) % self.partition_count
+
                 frontier = self.frontiers[partition_id]
 
                 url = frontier.get_next()
 
                 if url is not None:
+                    self._next_partition = (
+                        partition_id + 1
+                    ) % self.partition_count
                     return url
+
+            self._next_partition = (
+                start + 1
+            ) % self.partition_count
 
         return None
 

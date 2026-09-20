@@ -68,6 +68,7 @@ class SearchService:
         title = payload.get("title", "")
         text = payload.get("text")
         canonical_url = payload.get("canonical_url", "")
+        flush = payload.get("flush", True)
 
         if not isinstance(document_id, str) or not document_id:
             raise ValueError(
@@ -94,6 +95,11 @@ class SearchService:
                 "canonical_url must be a string"
             )
 
+        if not isinstance(flush, bool):
+            raise ValueError(
+                "flush must be a boolean"
+            )
+
         if self.indexing_pipeline is None:
             raise RuntimeError(
                 "indexing pipeline is not configured"
@@ -105,6 +111,7 @@ class SearchService:
             title=title,
             text=text,
             canonical_url=canonical_url,
+            flush=flush,
         )
 
     def flush_index(self):

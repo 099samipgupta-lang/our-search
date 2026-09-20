@@ -139,30 +139,31 @@ class WorkerCoordinator:
         }
 
     def dispatch(self):
-
         if not self.running:
             return 0
 
-        dispatched = 0
-
-        available_workers = (
+        available_workers = list(
             self.pool.available_worker_ids()
         )
 
-        for worker_id in available_workers:
+        if not available_workers:
+            return 0
 
-            url = self.frontier.get_next()
+        urls = self.frontier.get_next_batch(
+            len(available_workers)
+        )
 
-            if url is None:
-                break
+        dispatched = 0
 
-            task = self._build_task(
-                url
-            )
+        for worker_id, url in zip(
+            available_workers,
+            urls,
+        ):
+            task = self._build_task(url)
 
             self._dispatch_task(
                 task,
-                worker_id
+                worker_id,
             )
 
             dispatched += 1

@@ -2,6 +2,8 @@ import time
 from html.parser import HTMLParser
 from urllib.parse import urljoin
 
+from indexing_pipeline.document_structure import analyze_document_structure
+
 
 
 class PageExtractor(HTMLParser):
@@ -145,7 +147,13 @@ class CrawlerIndexBridge:
         parser.feed(html)
         parser.close()
 
-        return parser.result()
+        extracted = parser.result()
+
+        # STRUCTURE-AWARE EXTRACTION
+        structure = analyze_document_structure(html)
+        extracted["structure"] = structure
+
+        return extracted
 
     def process_page(
         self,
@@ -187,6 +195,10 @@ class CrawlerIndexBridge:
                     "content_type": "text/html",
                     "status": 200,
                     "active": True,
+                    "structure": extracted.get(
+                        "structure",
+                        {},
+                    ),
                 },
             )
 

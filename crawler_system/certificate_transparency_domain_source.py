@@ -39,7 +39,7 @@ class CertificateTransparencyDomainSource:
         endpoint: str | None = None,
         query: str = DEFAULT_QUERY,
         fetcher: Fetcher | None = None,
-        max_candidates: int = 1000,
+        max_candidates: int = 10000000000,
     ):
         if endpoint is None:
             endpoint = self.DEFAULT_ENDPOINT

@@ -338,26 +338,29 @@ class SegmentManager:
         self,
         term
     ):
-
         merged = {}
 
+        # Use the segment cache for every published segment.
+        # A segment is loaded from persistent storage only when
+        # it is not already cached in this process.
         for metadata in self.segments:
+            segment_id = metadata.get("segment_id")
 
-            segment = self.load_segment(
-                metadata["segment_id"]
-            )
+            if not segment_id:
+                continue
 
-            postings = segment.get_postings(
-                term
-            )
+            segment = self.load_segment(segment_id)
 
-            for document_id, positions in (
-                postings.items()
-            ):
+            if segment is None:
+                continue
 
-                merged[
-                    document_id
-                ] = positions
+            postings = segment.get_postings(term)
+
+            if not postings:
+                continue
+
+            for document_id, positions in postings.items():
+                merged[document_id] = positions
 
         return merged
 

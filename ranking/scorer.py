@@ -252,7 +252,7 @@ class RankingScorer:
 
         coverage = matched / len(unique_terms)
 
-        return 0.75 * coverage
+        return 3.0 * coverage
 
     def exact_title_bonus(
         self,
@@ -277,10 +277,10 @@ class RankingScorer:
             return 0.0
 
         if query_normalized == title_normalized:
-            return 1.25
+            return 5.0
 
         if query_normalized in title_normalized:
-            return 0.35
+            return 1.5
 
         return 0.0
 
@@ -308,6 +308,6 @@ class RankingScorer:
         if matched == 0:
             return 0.0
 
-        return 0.20 * (
+        return 1.5 * (
             matched / len(unique_terms)
         )

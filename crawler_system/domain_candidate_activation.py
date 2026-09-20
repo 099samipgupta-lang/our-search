@@ -125,6 +125,7 @@ class DomainCandidateActivator:
         return {
             "hostname": hostname,
             "first_url": first_url,
+            "seed_url": record.get("seed_url", first_url),
             "source_hostname": None,
             "discovered_at": float(
                 record.get("discovered_at", 0.0)
@@ -246,12 +247,13 @@ class DomainCandidateActivator:
             }
 
         try:
-            expansion_added = (
-                self.expansion_store.add(
-                    candidate["first_url"]
-                )
+            expansion_added = self.crawler._add_url(
+                candidate["first_url"],
+                source="global_domain_discovery",
+                depth=0,
+                seed=False,
+                source_url=candidate["first_url"],
             )
-
             expansion_record = (
                 self.expansion_store.get(
                     hostname

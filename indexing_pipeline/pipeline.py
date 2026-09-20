@@ -156,12 +156,20 @@ class CrawlIndexPipeline:
         else:
             self.stats["indexed"] += 1
 
+        document_metadata = dict(metadata or {})
+
+        structure = document_metadata.get(
+            "structure",
+            {},
+        )
+
         document = self.indexer.index_document(
             document_id=document_id,
             url=url,
             title=title,
             text=text,
             canonical_url=canonical_url,
+            structure=structure,
         )
 
         self.version_state.activate(
@@ -169,7 +177,6 @@ class CrawlIndexPipeline:
             content_hash,
         )
 
-        document_metadata = dict(metadata or {})
         document_metadata.setdefault(
             "content_hash",
             content_hash,
@@ -241,6 +248,11 @@ class CrawlIndexPipeline:
             self.segment_manager
         )
 
+        if segment_id is not None:
+            # Immediately publish the newly created segment
+            # to the live retrieval view.
+            self.search_index.refresh()
+
         if self.storage_repository is not None:
 
             self.storage_repository.save_version_state(
@@ -256,11 +268,28 @@ class CrawlIndexPipeline:
 
         return segment_id
 
-    def index_document(self, document_id, url, title, text, canonical_url=""):
-        result = self.add_document(document_id=document_id, url=url, title=title, text=text, canonical_url=canonical_url)
+    def index_document(
+        self,
+        document_id,
+        url,
+        title,
+        text,
+        canonical_url="",
+        flush=True,
+    ):
+        result = self.add_document(
+            document_id=document_id,
+            url=url,
+            title=title,
+            text=text,
+            canonical_url=canonical_url,
+        )
+
         segment_id = None
-        if result.get("action") != "skipped":
+
+        if flush and result.get("action") != "skipped":
             segment_id = self.flush()
+
         result["segment_id"] = segment_id
         return result
 

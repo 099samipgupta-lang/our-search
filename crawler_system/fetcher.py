@@ -99,6 +99,11 @@ class _ConnectionPool:
 
     def acquire(self):
 
+        deadline = (
+            time.monotonic()
+            + self.timeout
+        )
+
         with self._condition:
 
             while True:
@@ -120,7 +125,21 @@ class _ConnectionPool:
 
                     return self._create_connection()
 
-                self._condition.wait()
+                remaining = (
+                    deadline
+                    - time.monotonic()
+                )
+
+                if remaining <= 0:
+
+                    raise TimeoutError(
+                        "Connection pool "
+                        "acquire timeout"
+                    )
+
+                self._condition.wait(
+                    timeout=remaining
+                )
 
     def release(
         self,
@@ -755,6 +774,13 @@ class Fetcher:
 
                     reusable = True
 
+                if reusable:
+                    pool.release(connection)
+                else:
+                    pool.discard(connection)
+
+                connection = None
+
                 if status == 304:
 
                     return self._result(
@@ -1008,6 +1034,46 @@ class Fetcher:
 
                     connection = None
 
+                error_text = str(error)
+
+                error_type = type(error).__name__
+
+                error_reason = getattr(
+                    error,
+                    "reason",
+                    None,
+                )
+
+                error_errno = getattr(
+                    error,
+                    "errno",
+                    None,
+                )
+
+                if (
+                    error_reason is not None
+                    and error_reason is not error
+                ):
+
+                    reason_text = str(
+                        error_reason
+                    )
+
+                else:
+
+                    reason_text = None
+
+                diagnostic = {
+                    "type":
+                        error_type,
+                    "message":
+                        error_text,
+                    "reason":
+                        reason_text,
+                    "errno":
+                        error_errno,
+                }
+
                 if retries < self.max_retries:
 
                     retries += 1
@@ -1044,7 +1110,15 @@ class Fetcher:
                     "last_modified":
                         None,
                     "error":
-                        str(error),
+                        error_text,
+                    "error_type":
+                        error_type,
+                    "error_reason":
+                        reason_text,
+                    "error_errno":
+                        error_errno,
+                    "error_diagnostic":
+                        diagnostic,
                 }
 
             except Exception as error:

@@ -178,6 +178,7 @@ class RemoteCrawlerIndexBridge:
                 "text": text,
                 "canonical_url":
                     extracted["canonical_url"],
+                "flush": True,
             }
 
             result = self._post_json(

@@ -45,6 +45,15 @@ class AutomaticCrawlerIndexer:
 
             action = outcome.get("action")
 
+            if action == "failed":
+                print(
+                    "INDEX_ERROR:",
+                    outcome.get("error"),
+                    flush=True,
+                )
+                self.stats["failed"] += 1
+                return
+
             if action == "indexed":
                 self.stats["new_indexed"] += 1
                 self.pending += 1
@@ -59,8 +68,14 @@ class AutomaticCrawlerIndexer:
             if self.pending >= self.flush_every:
                 self.flush()
 
-        except Exception:
+        except Exception as error:
             self.stats["failed"] += 1
+            print(
+                "CRAWLER_INDEX_EXCEPTION:",
+                type(error).__name__,
+                str(error),
+                flush=True,
+            )
 
     def process_deleted(self, document_id):
         try:

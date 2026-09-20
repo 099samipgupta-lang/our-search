@@ -4,7 +4,22 @@ class LiveVersionedIndex:
         self.pending_index = pending_index
         self.version_state = version_state
 
+    def refresh(self):
+        """
+        Refresh the live view of the index.
+
+        SegmentManager already updates its in-memory segment list
+        and cache when a new segment is published. Reloading the
+        manifest here would clear that cache and force remote
+        segment reloads during normal search.
+        """
+        return {
+            "segments": self.segment_manager.segment_count(),
+        }
+
     def get_postings(self, term):
+        self.refresh()
+
         persistent = self.segment_manager.get_postings(term)
         pending = self.pending_index.get_postings(term)
 

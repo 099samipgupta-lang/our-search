@@ -64,9 +64,6 @@ class SupabaseIndexStorage(IndexStorageBackend):
     def _headers(self, extra=None):
 
         headers = {
-            "Authorization": (
-                "Bearer " + self.api_key
-            ),
             "apikey": self.api_key,
         }
 

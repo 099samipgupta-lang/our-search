@@ -678,6 +678,49 @@ class URLStateStore:
 
             return cursor.rowcount == 1
 
+    def force_requeue(
+        self,
+        url: str,
+        priority: Optional[float] = None,
+    ) -> bool:
+        """Force an existing crawled URL back into the crawl queue."""
+
+        with self._lock:
+            if priority is None:
+                cursor = self._connection.execute(
+                    """
+                    UPDATE urls
+                    SET
+                        state = 'queued',
+                        lease_owner = NULL,
+                        leased_at = NULL,
+                        last_error = NULL,
+                        next_crawl_at = NULL
+                    WHERE url = ?
+                      AND state = 'crawled'
+                    """,
+                    (url,),
+                )
+            else:
+                cursor = self._connection.execute(
+                    """
+                    UPDATE urls
+                    SET
+                        state = 'queued',
+                        priority = ?,
+                        lease_owner = NULL,
+                        leased_at = NULL,
+                        last_error = NULL,
+                        next_crawl_at = NULL
+                    WHERE url = ?
+                      AND state = 'crawled'
+                    """,
+                    (float(priority), url),
+                )
+
+            self._connection.commit()
+            return cursor.rowcount == 1
+
     # ============================================================
     # HOST STATE
     # ============================================================
@@ -1178,7 +1221,7 @@ class URLStateStore:
         owner: str,
         now: Optional[float] = None,
     ) -> Optional[Dict[str, Any]]:
-        """Atomically claim the highest-priority domain-ready URL."""
+        """Claim the next ready URL for crawling."""
 
         if not owner:
             raise ValueError("owner must not be empty")
@@ -1192,89 +1235,129 @@ class URLStateStore:
         with self._lock:
             self._connection.execute("BEGIN IMMEDIATE")
 
-            row = self._connection.execute(
+            frontier_rows = self._connection.execute(
                 """
                 SELECT
-                    rf.url,
-                    rf.host,
-                    rf.priority,
-                    rf.ready_at,
-                    rf.sequence,
-                    u.document_id,
-                    u.state,
-                    u.attempts,
-                    u.source,
-                    u.discovered_at,
-                    u.last_crawled_at,
-                    u.next_crawl_at,
-                    u.last_status,
-                    u.last_error,
-                    u.lease_owner,
-                    u.leased_at,
-                    u.etag,
-                    u.last_modified,
-                    h.crawl_delay,
-                    h.last_crawl_time,
-                    h.next_allowed_time,
-                    h.failures,
-                    h.active_concurrency,
-                    h.max_concurrency,
-                    h.backoff_until
-                FROM ready_frontier rf
-                JOIN urls u ON u.url = rf.url
-                JOIN hosts h ON h.host = rf.host
-                WHERE u.state IN ('discovered', 'queued', 'retry')
-                  AND (
-                      u.next_crawl_at IS NULL
-                      OR u.next_crawl_at <= ?
-                  )
-                  AND MAX(
-                      h.last_crawl_time + h.crawl_delay,
-                      h.next_allowed_time,
-                      h.backoff_until
-                  ) <= ?
-                  AND h.active_concurrency < h.max_concurrency
+                    url,
+                    host,
+                    priority,
+                    ready_at,
+                    sequence
+                FROM ready_frontier
                 ORDER BY
-                    (
-                        rf.priority
-                        + MIN(
-                            100.0,
-                            MAX(
-                                0.0,
-                                ? - MAX(
-                                    rf.ready_at,
-                                    h.last_crawl_time
-                                )
-                            )
-                        )
-                    ) DESC,
-                    rf.priority DESC,
-                    rf.ready_at ASC,
-                    rf.sequence ASC
-                LIMIT 1
-                """,
-                (timestamp, timestamp, timestamp),
-            ).fetchone()
+                    priority DESC,
+                    ready_at ASC,
+                    sequence ASC
+                LIMIT 256
+                """
+            ).fetchall()
+
+            row = None
+
+            for frontier_row in frontier_rows:
+                url = str(frontier_row["url"])
+
+                url_row = self._connection.execute(
+                    """
+                    SELECT *
+                    FROM urls
+                    WHERE url = ?
+                      AND state IN (
+                          'discovered',
+                          'queued',
+                          'retry'
+                      )
+                    """,
+                    (url,),
+                ).fetchone()
+
+                if url_row is None:
+                    continue
+
+                next_crawl_at = url_row["next_crawl_at"]
+
+                if (
+                    next_crawl_at is not None
+                    and float(next_crawl_at) > timestamp
+                ):
+                    continue
+
+                host = str(url_row["host"])
+
+                host_row = self._connection.execute(
+                    """
+                    SELECT *
+                    FROM hosts
+                    WHERE host = ?
+                    """,
+                    (host,),
+                ).fetchone()
+
+                if host_row is None:
+                    continue
+
+                host_ready_at = max(
+                    float(host_row["last_crawl_time"])
+                    + float(host_row["crawl_delay"]),
+                    float(host_row["next_allowed_time"]),
+                    float(host_row["backoff_until"]),
+                )
+
+                if host_ready_at > timestamp:
+                    continue
+
+                if (
+                    int(host_row["active_concurrency"])
+                    >= int(host_row["max_concurrency"])
+                ):
+                    continue
+
+                row = url_row
+                break
 
             if row is None:
                 self._connection.rollback()
                 return None
 
             host = str(row["host"])
-            delay = float(row["crawl_delay"])
 
-            reserved_time = max(
-                float(row["last_crawl_time"]) + delay,
-                float(row["next_allowed_time"]),
-                float(row["backoff_until"]),
-                timestamp,
-            ) + delay
+            host_row = self._connection.execute(
+                """
+                SELECT
+                    crawl_delay,
+                    last_crawl_time,
+                    next_allowed_time,
+                    backoff_until,
+                    active_concurrency,
+                    max_concurrency
+                FROM hosts
+                WHERE host = ?
+                """,
+                (host,),
+            ).fetchone()
+
+            if host_row is None:
+                self._connection.rollback()
+                return None
+
+            delay = float(host_row["crawl_delay"])
+
+            reserved_time = (
+                max(
+                    float(host_row["last_crawl_time"]) + delay,
+                    float(host_row["next_allowed_time"]),
+                    float(host_row["backoff_until"]),
+                    timestamp,
+                )
+                + delay
+            )
 
             host_cursor = self._connection.execute(
                 """
                 UPDATE hosts
                 SET
-                    active_concurrency = active_concurrency + 1,
+                    active_concurrency =
+                        active_concurrency + 1,
                     next_allowed_time = ?
                 WHERE host = ?
                   AND active_concurrency < max_concurrency
@@ -1303,7 +1386,11 @@ class URLStateStore:
                     lease_owner = ?,
                     leased_at = ?
                 WHERE url = ?
-                  AND state IN ('discovered', 'queued', 'retry')
+                  AND state IN (
+                      'discovered',
+                      'queued',
+                      'retry'
+                  )
                 """,
                 (
                     owner,
@@ -1334,6 +1421,229 @@ class URLStateStore:
             self._connection.commit()
 
             return dict(result)
+
+    def claim_next_batch(
+        self,
+        owner: str,
+        limit: int,
+        now: Optional[float] = None,
+    ) -> List[Dict[str, Any]]:
+        """Atomically claim up to ``limit`` ready URLs."""
+
+        if not owner:
+            raise ValueError("owner must not be empty")
+
+        if limit <= 0:
+            return []
+
+        timestamp = time.time() if now is None else float(now)
+        claimed: List[Dict[str, Any]] = []
+
+        with self._lock:
+            self._connection.execute("BEGIN IMMEDIATE")
+
+            # Inspect only a bounded candidate window instead of loading
+            # the entire ready frontier into memory.
+            candidate_limit = max(int(limit) * 512, 4096)
+
+            frontier_rows = self._connection.execute(
+                   """
+                   WITH eligible AS (
+                       SELECT
+                           rf.url,
+                           rf.host,
+                           rf.priority,
+                           rf.ready_at,
+                           rf.sequence,
+                           h.max_concurrency - h.active_concurrency AS available_slots,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY rf.host
+                               ORDER BY
+                                   rf.priority DESC,
+                                   rf.ready_at ASC,
+                                   rf.sequence ASC
+                           ) AS host_rank
+                       FROM ready_frontier AS rf
+                       JOIN urls AS u
+                           ON u.url = rf.url
+                       JOIN hosts AS h
+                           ON h.host = rf.host
+                       WHERE u.state IN ('discovered', 'queued', 'retry')
+                         AND (
+                               u.next_crawl_at IS NULL
+                               OR u.next_crawl_at <= ?
+                         )
+                         AND MAX(
+                               h.last_crawl_time + h.crawl_delay,
+                               h.next_allowed_time,
+                               h.backoff_until
+                             ) <= ?
+                         AND h.active_concurrency < h.max_concurrency
+                   )
+                   SELECT
+                       url,
+                       host,
+                       priority,
+                       ready_at,
+                       sequence
+                   FROM eligible
+                   WHERE host_rank <= available_slots
+                   ORDER BY
+                       priority DESC,
+                       ready_at ASC,
+                       sequence ASC
+                   LIMIT ?
+                   """,
+                   (
+                       timestamp,
+                       timestamp,
+                       candidate_limit,
+                   ),
+               ).fetchall()
+
+
+            for frontier_row in frontier_rows:
+                if len(claimed) >= limit:
+                    break
+
+                url = str(frontier_row["url"])
+                host = str(frontier_row["host"])
+
+                # Re-read the host inside this transaction because an
+                # earlier claim in this same batch may have changed it.
+                host_row = self._connection.execute(
+                    """
+                    SELECT
+                        active_concurrency,
+                        max_concurrency,
+                        last_crawl_time,
+                        crawl_delay,
+                        next_allowed_time,
+                        backoff_until
+                    FROM hosts
+                    WHERE host = ?
+                    """,
+                    (host,),
+                ).fetchone()
+
+                if host_row is None:
+                    continue
+
+                active = int(host_row["active_concurrency"])
+                maximum = int(host_row["max_concurrency"])
+
+                if active >= maximum:
+                    continue
+
+                host_ready_at = max(
+                    float(host_row["last_crawl_time"])
+                    + float(host_row["crawl_delay"]),
+                    float(host_row["next_allowed_time"]),
+                    float(host_row["backoff_until"]),
+                )
+
+                if host_ready_at > timestamp:
+                    continue
+
+                delay = float(host_row["crawl_delay"])
+
+                reserved_time = (
+                    max(
+                        float(host_row["last_crawl_time"]) + delay,
+                        float(host_row["next_allowed_time"]),
+                        float(host_row["backoff_until"]),
+                        timestamp,
+                    )
+                    + delay
+                )
+
+                host_cursor = self._connection.execute(
+                    """
+                    UPDATE hosts
+                    SET
+                        active_concurrency = active_concurrency + 1,
+                        next_allowed_time = ?
+                    WHERE host = ?
+                      AND active_concurrency < max_concurrency
+                      AND MAX(
+                            last_crawl_time + crawl_delay,
+                            next_allowed_time,
+                            backoff_until
+                          ) <= ?
+                    """,
+                    (
+                        reserved_time,
+                        host,
+                        timestamp,
+                    ),
+                )
+
+                if host_cursor.rowcount != 1:
+                    continue
+
+                url_cursor = self._connection.execute(
+                    """
+                    UPDATE urls
+                    SET
+                        state = 'leased',
+                        lease_owner = ?,
+                        leased_at = ?
+                    WHERE url = ?
+                      AND state IN ('discovered', 'queued', 'retry')
+                    """,
+                    (
+                        owner,
+                        timestamp,
+                        url,
+                    ),
+                )
+
+                if url_cursor.rowcount != 1:
+                    self._connection.execute(
+                        """
+                        UPDATE hosts
+                        SET active_concurrency =
+                            CASE
+                                WHEN active_concurrency > 0
+                                THEN active_concurrency - 1
+                                ELSE 0
+                            END
+                        WHERE host = ?
+                        """,
+                        (host,),
+                    )
+                    continue
+
+                result = self._connection.execute(
+                    """
+                    SELECT *
+                    FROM urls
+                    WHERE url = ?
+                    """,
+                    (url,),
+                ).fetchone()
+
+                if result is None:
+                    self._connection.execute(
+                        """
+                        UPDATE hosts
+                        SET active_concurrency =
+                            CASE
+                                WHEN active_concurrency > 0
+                                THEN active_concurrency - 1
+                                ELSE 0
+                            END
+                        WHERE host = ?
+                        """,
+                        (host,),
+                    )
+                    continue
+
+                claimed.append(dict(result))
+
+            self._connection.commit()
+
+        return claimed
 
     def mark_crawled(
         self,

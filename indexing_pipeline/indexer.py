@@ -1,3 +1,5 @@
+from urllib.parse import urlparse
+
 from search_index.inverted_index import InvertedIndex
 from indexing_pipeline.document import IndexedDocument
 
@@ -13,10 +15,62 @@ class DocumentIndexer:
         title,
         text,
         canonical_url="",
+        structure=None,
     ):
+        searchable_text = " ".join(
+            part
+            for part in (url, title, text, canonical_url)
+            if isinstance(part, str) and part
+        )
+
+        structure = (
+            structure
+            if isinstance(structure, dict)
+            else {}
+        )
+
+        parsed_url = urlparse(
+            url or ""
+        )
+
+        domain = (
+            parsed_url.hostname
+            or ""
+        ).casefold()
+
         self.index.add_document(
             document_id,
-            text,
+            text=structure.get(
+                "main_content",
+                text,
+            ),
+            title=structure.get(
+                "title",
+                title,
+            ),
+            url=url,
+            domain=domain,
+            canonical_url=canonical_url,
+            headings=structure.get(
+                "headings",
+                "",
+            ),
+            navigation=structure.get(
+                "navigation_text",
+                "",
+            ),
+            footer=structure.get(
+                "footer_text",
+                "",
+            ),
+            sidebar=structure.get(
+                "sidebar_text",
+                "",
+            ),
+            anchor_text=structure.get(
+                "anchor_text",
+                "",
+            ),
         )
 
         return IndexedDocument(
