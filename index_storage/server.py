@@ -14,13 +14,16 @@ STORAGE_ROOT = os.environ.get(
 
 HOST = os.environ.get(
     "OUR_SEARCH_STORAGE_HOST",
-    "127.0.0.1",
+    "0.0.0.0",
 )
 
 PORT = int(
     os.environ.get(
-        "OUR_SEARCH_STORAGE_PORT",
-        "9090",
+        "PORT",
+        os.environ.get(
+            "OUR_SEARCH_STORAGE_PORT",
+            "9090",
+        ),
     )
 )
 
