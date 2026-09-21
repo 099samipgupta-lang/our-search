@@ -24,7 +24,13 @@ class WriteAheadLog:
     def _checksum(payload):
         return hashlib.sha256(payload).hexdigest()
 
-    def append(self, operation, key, data=b""):
+    def append(
+        self,
+        operation,
+        key,
+        data=b"",
+        metadata=None,
+    ):
         if operation not in {"put", "delete"}:
             raise ValueError("unsupported WAL operation")
 
@@ -34,11 +40,17 @@ class WriteAheadLog:
         if not isinstance(data, bytes):
             raise TypeError("data must be bytes")
 
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError("metadata must be a dictionary or None")
+
         record = {
             "operation": operation,
             "key": key,
             "data": data.hex(),
         }
+
+        if metadata is not None:
+            record["metadata"] = metadata
 
         payload = json.dumps(
             record,
