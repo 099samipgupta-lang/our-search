@@ -938,12 +938,7 @@ try:
     )
 
     print(
-        "Storage: Supabase",
-        flush=True,
-    )
-
-    print(
-        f"Bucket: {SUPABASE_BUCKET}",
+        "Storage backend: configured by OUR_SEARCH_STORAGE_MODE",
         flush=True,
     )
 
