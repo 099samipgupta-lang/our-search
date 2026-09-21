@@ -6,7 +6,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from index_storage.repository import IndexStorageRepository
-from index_storage.supabase import SupabaseIndexStorage
+from index_storage.config import create_index_storage
 from indexing_pipeline.pipeline import CrawlIndexPipeline
 from search_service.service import SearchService
 
@@ -34,40 +34,11 @@ INDEX_ROOT = os.path.join(
 # Supabase configuration
 # ------------------------------------------------------------
 
-SUPABASE_URL = os.environ.get(
-    "SUPABASE_URL"
-)
-
-SUPABASE_KEY = os.environ.get(
-    "SUPABASE_KEY"
-)
-
-SUPABASE_BUCKET = os.environ.get(
-    "SUPABASE_BUCKET",
-    "Videos",
-)
-
-
-if not SUPABASE_URL:
-    raise RuntimeError(
-        "SUPABASE_URL is required"
-    )
-
-if not SUPABASE_KEY:
-    raise RuntimeError(
-        "SUPABASE_KEY is required"
-    )
-
-
 # ------------------------------------------------------------
-# Search engine
+# Storage backend
 # ------------------------------------------------------------
 
-storage = SupabaseIndexStorage(
-    project_url=SUPABASE_URL,
-    api_key=SUPABASE_KEY,
-    bucket=SUPABASE_BUCKET,
-)
+storage = create_index_storage()
 
 storage_repository = IndexStorageRepository(
     storage

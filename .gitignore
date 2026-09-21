@@ -13,3 +13,6 @@ page_urls.json
 
 test_*.py
 test_*/
+
+# Local safety backups
+.safety_backups/
