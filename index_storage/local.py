@@ -1,6 +1,7 @@
 import os
 
 from index_storage.backend import IndexStorageBackend
+from index_storage.integrity import StorageIntegrity
 from index_storage.wal import WriteAheadLog
 
 
@@ -14,6 +15,16 @@ class LocalIndexStorage(IndexStorageBackend):
         self.wal_path = os.path.join(
             self.root,
             "storage.wal",
+        )
+
+        self.integrity_root = os.path.join(
+            self.root,
+            ".integrity",
+        )
+
+        os.makedirs(
+            self.integrity_root,
+            exist_ok=True,
         )
 
         self.wal = WriteAheadLog(self.wal_path)
@@ -42,6 +53,74 @@ class LocalIndexStorage(IndexStorageBackend):
             raise ValueError("key escapes storage root")
 
         return path
+
+    def _integrity_path(self, key):
+        path = self._path(key)
+
+        relative = os.path.relpath(
+            path,
+            self.root,
+        )
+
+        metadata_path = os.path.join(
+            self.integrity_root,
+            relative + ".sha256",
+        )
+
+        return metadata_path
+
+    def _write_integrity(self, key, data):
+        metadata_path = self._integrity_path(key)
+
+        directory = os.path.dirname(metadata_path)
+        os.makedirs(directory, exist_ok=True)
+
+        checksum = StorageIntegrity.checksum(data)
+
+        temporary_path = metadata_path + ".tmp"
+
+        with open(
+            temporary_path,
+            "w",
+            encoding="utf-8",
+        ) as file:
+            file.write(checksum)
+            file.flush()
+            os.fsync(file.fileno())
+
+        os.replace(
+            temporary_path,
+            metadata_path,
+        )
+
+    def _remove_integrity(self, key):
+        metadata_path = self._integrity_path(key)
+
+        if os.path.exists(metadata_path):
+            os.remove(metadata_path)
+
+    def _verify_integrity(self, key, data):
+        metadata_path = self._integrity_path(key)
+
+        if not os.path.exists(metadata_path):
+            raise ValueError(
+                f"missing integrity metadata: {key}"
+            )
+
+        with open(
+            metadata_path,
+            "r",
+            encoding="utf-8",
+        ) as file:
+            expected_checksum = file.read().strip()
+
+        if not StorageIntegrity.verify(
+            data,
+            expected_checksum,
+        ):
+            raise ValueError(
+                f"storage integrity check failed: {key}"
+            )
 
     def _recover(self):
         records = self.wal.recover()
@@ -72,9 +151,18 @@ class LocalIndexStorage(IndexStorageBackend):
                     path
                 )
 
+                self._write_integrity(
+                    key,
+                    data,
+                )
+
             elif operation == "delete":
                 if os.path.exists(path):
                     os.remove(path)
+
+                self._remove_integrity(
+                    key,
+                )
 
         if records:
             self.wal.clear()
@@ -109,6 +197,11 @@ class LocalIndexStorage(IndexStorageBackend):
             path
         )
 
+        self._write_integrity(
+            key,
+            data,
+        )
+
         self.wal.clear()
 
     def get(self, key):
@@ -121,7 +214,14 @@ class LocalIndexStorage(IndexStorageBackend):
             path,
             "rb"
         ) as file:
-            return file.read()
+            data = file.read()
+
+        self._verify_integrity(
+            key,
+            data,
+        )
+
+        return data
 
     def exists(self, key):
         return os.path.exists(
@@ -141,6 +241,10 @@ class LocalIndexStorage(IndexStorageBackend):
 
         os.remove(path)
 
+        self._remove_integrity(
+            key,
+        )
+
         self.wal.clear()
 
         return True
@@ -156,6 +260,12 @@ class LocalIndexStorage(IndexStorageBackend):
         keys = []
 
         for root, directories, files in os.walk(base):
+            directories[:] = [
+                directory
+                for directory in directories
+                if directory != ".integrity"
+            ]
+
             directories.sort()
             files.sort()
 
