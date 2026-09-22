@@ -1,4 +1,5 @@
 import os
+import threading
 
 from index_storage.backend import IndexStorageBackend
 from index_storage.integrity import StorageIntegrity
@@ -10,6 +11,7 @@ class LocalIndexStorage(IndexStorageBackend):
 
     def __init__(self, root="index_storage_data"):
         self.root = os.path.abspath(root)
+        self._lock = threading.RLock()
 
         os.makedirs(self.root, exist_ok=True)
 
@@ -266,150 +268,160 @@ class LocalIndexStorage(IndexStorageBackend):
             self.wal.clear()
 
     def put(self, key, data):
-        path = self._path(key)
+        with self._lock:
+            path = self._path(key)
 
-        if not isinstance(data, bytes):
-            raise TypeError("data must be bytes")
+            if not isinstance(data, bytes):
+                raise TypeError("data must be bytes")
 
-        directory = os.path.dirname(path)
-        os.makedirs(directory, exist_ok=True)
+            directory = os.path.dirname(path)
+            os.makedirs(directory, exist_ok=True)
 
-        version = self._next_version(key)
+            version = self._next_version(key)
 
-        checksum = StorageIntegrity.checksum(data)
+            checksum = StorageIntegrity.checksum(data)
 
-        metadata = StorageMetadata.create(
-            version=version,
-            data=data,
-            checksum=checksum,
-        )
+            metadata = StorageMetadata.create(
+                version=version,
+                data=data,
+                checksum=checksum,
+            )
 
-        self.wal.append(
-            "put",
-            key,
-            data,
-            metadata=metadata.to_dict(),
-        )
+            self.wal.append(
+                "put",
+                key,
+                data,
+                metadata=metadata.to_dict(),
+            )
 
-        temporary_path = path + ".tmp"
+            temporary_path = path + ".tmp"
 
-        with open(
-            temporary_path,
-            "wb"
-        ) as file:
-            file.write(data)
-            file.flush()
-            os.fsync(file.fileno())
+            with open(
+                temporary_path,
+                "wb"
+            ) as file:
+                file.write(data)
+                file.flush()
+                os.fsync(file.fileno())
 
-        os.replace(
-            temporary_path,
-            path
-        )
+            os.replace(
+                temporary_path,
+                path
+            )
 
-        self._write_integrity(
-            key,
-            data,
-        )
+            self._write_integrity(
+                key,
+                data,
+            )
 
-        self._write_metadata(
-            key,
-            metadata,
-        )
+            self._write_metadata(
+                key,
+                metadata,
+            )
 
-        self.wal.clear()
+            self.wal.clear()
 
     def get(self, key):
-        path = self._path(key)
+        with self._lock:
+            path = self._path(key)
 
-        if not os.path.exists(path):
-            return None
+            if not os.path.exists(path):
+                return None
 
-        with open(
-            path,
-            "rb"
-        ) as file:
-            data = file.read()
+            with open(
+                path,
+                "rb"
+            ) as file:
+                data = file.read()
 
-        self._verify_integrity(
-            key,
-            data,
-        )
+            self._verify_integrity(
+                key,
+                data,
+            )
 
-        return data
+            return data
 
     def exists(self, key):
-        return os.path.exists(
-            self._path(key)
-        )
+        with self._lock:
+            return os.path.exists(
+                self._path(key)
+            )
 
     def delete(self, key):
-        path = self._path(key)
+        with self._lock:
+            path = self._path(key)
 
-        if not os.path.exists(path):
-            return False
+            if not os.path.exists(path):
+                return False
 
-        self.wal.append(
-            "delete",
-            key,
-        )
+            self.wal.append(
+                "delete",
+                key,
+            )
 
-        os.remove(path)
+            os.remove(path)
 
-        self._remove_integrity(
-            key,
-        )
+            self._remove_integrity(
+                key,
+            )
 
-        self.wal.clear()
+            metadata_path = self._metadata_path(key)
 
-        return True
+            if os.path.exists(metadata_path):
+                os.remove(metadata_path)
+
+            self.wal.clear()
+
+            return True
 
     def list_keys(self, prefix=""):
-        prefix = prefix or ""
+        with self._lock:
+            prefix = prefix or ""
 
-        base = self._path(prefix) if prefix else self.root
+            base = self._path(prefix) if prefix else self.root
 
-        if not os.path.exists(base):
-            return []
+            if not os.path.exists(base):
+                return []
 
-        keys = []
+            keys = []
 
-        for root, directories, files in os.walk(base):
-            directories[:] = [
-                directory
-                for directory in directories
-                if directory not in {
-                    ".integrity",
-                    ".metadata",
-                }
-            ]
+            for root, directories, files in os.walk(base):
+                directories[:] = [
+                    directory
+                    for directory in directories
+                    if directory not in {
+                        ".integrity",
+                        ".metadata",
+                    }
+                ]
 
-            directories.sort()
-            files.sort()
+                directories.sort()
+                files.sort()
 
-            for filename in files:
-                if filename in {
-                    "storage.wal",
-                }:
-                    continue
+                for filename in files:
+                    if filename in {
+                        "storage.wal",
+                    }:
+                        continue
 
-                if filename.endswith(".tmp"):
-                    continue
+                    if filename.endswith(".tmp"):
+                        continue
 
-                full_path = os.path.join(
-                    root,
-                    filename
-                )
-
-                relative = os.path.relpath(
-                    full_path,
-                    self.root
-                )
-
-                keys.append(
-                    relative.replace(
-                        os.sep,
-                        "/"
+                    full_path = os.path.join(
+                        root,
+                        filename
                     )
-                )
 
-        return sorted(keys)
+                    relative = os.path.relpath(
+                        full_path,
+                        self.root
+                    )
+
+                    keys.append(
+                        relative.replace(
+                            os.sep,
+                            "/"
+                        )
+                    )
+
+            return sorted(keys)
