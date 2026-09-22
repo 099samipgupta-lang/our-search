@@ -3,8 +3,30 @@ import threading
 
 from index_storage.backend import IndexStorageBackend
 from index_storage.integrity import StorageIntegrity
+from index_storage.large_objects import LargeObjectStore
 from index_storage.metadata import StorageMetadata
 from index_storage.wal import WriteAheadLog
+
+
+class _DirectStorageAdapter:
+
+    def __init__(self, storage):
+        self.storage = storage
+
+    def put(self, key, data):
+        return self.storage._put_direct(key, data)
+
+    def get(self, key):
+        return self.storage._get_direct(key)
+
+    def exists(self, key):
+        return self.storage._exists_direct(key)
+
+    def delete(self, key):
+        return self.storage._delete_direct(key)
+
+    def list_keys(self, prefix=""):
+        return self.storage._list_keys_direct(prefix)
 
 
 class LocalIndexStorage(IndexStorageBackend):
@@ -43,6 +65,10 @@ class LocalIndexStorage(IndexStorageBackend):
         self.wal = WriteAheadLog(self.wal_path)
 
         self._recover()
+
+        self._large_objects = LargeObjectStore(
+            _DirectStorageAdapter(self)
+        )
 
     def _path(self, key):
         if not isinstance(key, str):
@@ -267,161 +293,220 @@ class LocalIndexStorage(IndexStorageBackend):
         if records:
             self.wal.clear()
 
+    def _put_direct(self, key, data):
+        path = self._path(key)
+
+        if not isinstance(data, bytes):
+            raise TypeError("data must be bytes")
+
+        directory = os.path.dirname(path)
+        os.makedirs(directory, exist_ok=True)
+
+        version = self._next_version(key)
+
+        checksum = StorageIntegrity.checksum(data)
+
+        metadata = StorageMetadata.create(
+            version=version,
+            data=data,
+            checksum=checksum,
+        )
+
+        self.wal.append(
+            "put",
+            key,
+            data,
+            metadata=metadata.to_dict(),
+        )
+
+        temporary_path = path + ".tmp"
+
+        with open(
+            temporary_path,
+            "wb"
+        ) as file:
+            file.write(data)
+            file.flush()
+            os.fsync(file.fileno())
+
+        os.replace(
+            temporary_path,
+            path
+        )
+
+        self._write_integrity(
+            key,
+            data,
+        )
+
+        self._write_metadata(
+            key,
+            metadata,
+        )
+
+        self.wal.clear()
+
+    def _get_direct(self, key):
+        path = self._path(key)
+
+        if not os.path.exists(path):
+            return None
+
+        with open(
+            path,
+            "rb"
+        ) as file:
+            data = file.read()
+
+        self._verify_integrity(
+            key,
+            data,
+        )
+
+        return data
+
+    def _exists_direct(self, key):
+        return os.path.exists(
+            self._path(key)
+        )
+
+    def _delete_direct(self, key):
+        path = self._path(key)
+
+        if not os.path.exists(path):
+            return False
+
+        self.wal.append(
+            "delete",
+            key,
+        )
+
+        os.remove(path)
+
+        self._remove_integrity(
+            key,
+        )
+
+        metadata_path = self._metadata_path(key)
+
+        if os.path.exists(metadata_path):
+            os.remove(metadata_path)
+
+        self.wal.clear()
+
+        return True
+
+    def _list_keys_direct(self, prefix=""):
+        prefix = prefix or ""
+
+        base = self._path(prefix) if prefix else self.root
+
+        if not os.path.exists(base):
+            return []
+
+        keys = []
+
+        for root, directories, files in os.walk(base):
+            directories[:] = [
+                directory
+                for directory in directories
+                if directory not in {
+                    ".integrity",
+                    ".metadata",
+                }
+            ]
+
+            directories.sort()
+            files.sort()
+
+            for filename in files:
+                if filename in {
+                    "storage.wal",
+                }:
+                    continue
+
+                if filename.endswith(".tmp"):
+                    continue
+
+                full_path = os.path.join(
+                    root,
+                    filename
+                )
+
+                relative = os.path.relpath(
+                    full_path,
+                    self.root
+                )
+
+                keys.append(
+                    relative.replace(
+                        os.sep,
+                        "/"
+                    )
+                )
+
+        return sorted(keys)
+
     def put(self, key, data):
         with self._lock:
-            path = self._path(key)
+            if self._large_objects.policy.is_large(data):
+                self._large_objects.put(
+                    key,
+                    data,
+                )
+                return
 
-            if not isinstance(data, bytes):
-                raise TypeError("data must be bytes")
-
-            directory = os.path.dirname(path)
-            os.makedirs(directory, exist_ok=True)
-
-            version = self._next_version(key)
-
-            checksum = StorageIntegrity.checksum(data)
-
-            metadata = StorageMetadata.create(
-                version=version,
-                data=data,
-                checksum=checksum,
-            )
-
-            self.wal.append(
-                "put",
-                key,
-                data,
-                metadata=metadata.to_dict(),
-            )
-
-            temporary_path = path + ".tmp"
-
-            with open(
-                temporary_path,
-                "wb"
-            ) as file:
-                file.write(data)
-                file.flush()
-                os.fsync(file.fileno())
-
-            os.replace(
-                temporary_path,
-                path
-            )
-
-            self._write_integrity(
-                key,
-                data,
-            )
-
-            self._write_metadata(
-                key,
-                metadata,
-            )
-
-            self.wal.clear()
+            self._put_direct(key, data)
 
     def get(self, key):
         with self._lock:
-            path = self._path(key)
-
-            if not os.path.exists(path):
-                return None
-
-            with open(
-                path,
-                "rb"
-            ) as file:
-                data = file.read()
-
-            self._verify_integrity(
-                key,
-                data,
+            manifest_key = (
+                self._large_objects._manifest_key(key)
             )
 
-            return data
+            if self._exists_direct(manifest_key):
+                return self._large_objects.get(key)
+
+            return self._get_direct(key)
 
     def exists(self, key):
         with self._lock:
-            return os.path.exists(
-                self._path(key)
+            manifest_key = (
+                self._large_objects._manifest_key(key)
             )
+
+            if self._exists_direct(manifest_key):
+                return True
+
+            return self._exists_direct(key)
 
     def delete(self, key):
         with self._lock:
-            path = self._path(key)
-
-            if not os.path.exists(path):
-                return False
-
-            self.wal.append(
-                "delete",
-                key,
+            manifest_key = (
+                self._large_objects._manifest_key(key)
             )
 
-            os.remove(path)
+            if self._exists_direct(manifest_key):
+                return self._large_objects.delete(key)
 
-            self._remove_integrity(
-                key,
-            )
-
-            metadata_path = self._metadata_path(key)
-
-            if os.path.exists(metadata_path):
-                os.remove(metadata_path)
-
-            self.wal.clear()
-
-            return True
+            return self._delete_direct(key)
 
     def list_keys(self, prefix=""):
         with self._lock:
-            prefix = prefix or ""
+            physical_keys = self._list_keys_direct(prefix)
 
-            base = self._path(prefix) if prefix else self.root
+            logical_keys = set()
 
-            if not os.path.exists(base):
-                return []
+            for key in physical_keys:
+                if ".chunks/" in key:
+                    continue
 
-            keys = []
-
-            for root, directories, files in os.walk(base):
-                directories[:] = [
-                    directory
-                    for directory in directories
-                    if directory not in {
-                        ".integrity",
-                        ".metadata",
-                    }
-                ]
-
-                directories.sort()
-                files.sort()
-
-                for filename in files:
-                    if filename in {
-                        "storage.wal",
-                    }:
-                        continue
-
-                    if filename.endswith(".tmp"):
-                        continue
-
-                    full_path = os.path.join(
-                        root,
-                        filename
+                if key.endswith(".manifest"):
+                    logical_keys.add(
+                        key[:-len(".manifest")]
                     )
+                    continue
 
-                    relative = os.path.relpath(
-                        full_path,
-                        self.root
-                    )
+                logical_keys.add(key)
 
-                    keys.append(
-                        relative.replace(
-                            os.sep,
-                            "/"
-                        )
-                    )
-
-            return sorted(keys)
+            return sorted(logical_keys)
