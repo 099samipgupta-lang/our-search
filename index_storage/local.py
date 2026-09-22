@@ -2,6 +2,7 @@ import os
 import threading
 
 from index_storage.backend import IndexStorageBackend
+from index_storage.catalog import StorageCatalog
 from index_storage.integrity import StorageIntegrity
 from index_storage.large_objects import LargeObjectStore
 from index_storage.metadata import StorageMetadata
@@ -63,6 +64,10 @@ class LocalIndexStorage(IndexStorageBackend):
         )
 
         self.wal = WriteAheadLog(self.wal_path)
+
+        self.catalog = StorageCatalog(
+            self.root
+        )
 
         self._recover()
 
@@ -277,6 +282,15 @@ class LocalIndexStorage(IndexStorageBackend):
                     metadata,
                 )
 
+                if (
+                    ".chunks/" not in key
+                    and not key.endswith(".manifest")
+                ):
+                    self.catalog.put(
+                        key,
+                        metadata.to_dict(),
+                    )
+
             elif operation == "delete":
                 if os.path.exists(path):
                     os.remove(path)
@@ -289,6 +303,14 @@ class LocalIndexStorage(IndexStorageBackend):
 
                 if os.path.exists(metadata_path):
                     os.remove(metadata_path)
+
+                if (
+                    ".chunks/" not in key
+                    and not key.endswith(".manifest")
+                ):
+                    self.catalog.delete(
+                        key
+                    )
 
         if records:
             self.wal.clear()
@@ -392,6 +414,10 @@ class LocalIndexStorage(IndexStorageBackend):
         if os.path.exists(metadata_path):
             os.remove(metadata_path)
 
+        self.catalog.delete(
+            key
+        )
+
         self.wal.clear()
 
         return True
@@ -422,6 +448,7 @@ class LocalIndexStorage(IndexStorageBackend):
             for filename in files:
                 if filename in {
                     "storage.wal",
+                    StorageCatalog.FILENAME,
                 }:
                     continue
 
@@ -450,13 +477,31 @@ class LocalIndexStorage(IndexStorageBackend):
     def put(self, key, data):
         with self._lock:
             if self._large_objects.policy.is_large(data):
-                self._large_objects.put(
+                manifest = self._large_objects.put(
                     key,
                     data,
                 )
+
+                self.catalog.put(
+                    key,
+                    manifest.to_dict(),
+                )
+
                 return
 
             self._put_direct(key, data)
+
+            metadata = self._read_metadata(key)
+
+            if metadata is None:
+                raise ValueError(
+                    f"missing metadata after put: {key}"
+                )
+
+            self.catalog.put(
+                key,
+                metadata.to_dict(),
+            )
 
     def get(self, key):
         with self._lock:
@@ -487,26 +532,17 @@ class LocalIndexStorage(IndexStorageBackend):
             )
 
             if self._exists_direct(manifest_key):
-                return self._large_objects.delete(key)
+                deleted = self._large_objects.delete(key)
+
+                if deleted:
+                    self.catalog.delete(key)
+
+                return deleted
 
             return self._delete_direct(key)
 
     def list_keys(self, prefix=""):
         with self._lock:
-            physical_keys = self._list_keys_direct(prefix)
-
-            logical_keys = set()
-
-            for key in physical_keys:
-                if ".chunks/" in key:
-                    continue
-
-                if key.endswith(".manifest"):
-                    logical_keys.add(
-                        key[:-len(".manifest")]
-                    )
-                    continue
-
-                logical_keys.add(key)
-
-            return sorted(logical_keys)
+            return self.catalog.list_keys(
+                prefix
+            )
