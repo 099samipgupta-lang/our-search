@@ -3,10 +3,29 @@ import threading
 
 from index_storage.backend import IndexStorageBackend
 from index_storage.catalog import StorageCatalog
+from index_storage.config import validate_storage_config
+from index_storage.health import StorageHealthMonitor
 from index_storage.integrity import StorageIntegrity
 from index_storage.large_objects import LargeObjectStore
 from index_storage.metadata import StorageMetadata
+from index_storage.metrics import StorageMetrics
 from index_storage.wal import WriteAheadLog
+
+from functools import wraps
+
+
+def _count_storage_errors(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        try:
+            return method(self, *args, **kwargs)
+        except Exception:
+            self.metrics.record_error()
+            raise
+
+    return wrapped
+
+
 
 
 class _DirectStorageAdapter:
@@ -15,25 +34,42 @@ class _DirectStorageAdapter:
         self.storage = storage
 
     def put(self, key, data):
+        self.storage._ensure_open()
         return self.storage._put_direct(key, data)
 
     def get(self, key):
+        self.storage._ensure_open()
         return self.storage._get_direct(key)
 
     def exists(self, key):
+        self.storage._ensure_open()
         return self.storage._exists_direct(key)
 
     def delete(self, key):
+        self.storage._ensure_open()
         return self.storage._delete_direct(key)
 
     def list_keys(self, prefix=""):
+        self._ensure_open()
         return self.storage._list_keys_direct(prefix)
 
 
 class LocalIndexStorage(IndexStorageBackend):
 
-    def __init__(self, root="index_storage_data"):
+    def __init__(
+        self,
+        root="index_storage_data",
+        max_object_size=None,
+        max_key_length=1024,
+    ):
+        validate_storage_config(
+            root,
+            max_object_size=max_object_size,
+            max_key_length=max_key_length,
+        )
         self.root = os.path.abspath(root)
+        self.max_object_size = max_object_size
+        self.max_key_length = max_key_length
         self._lock = threading.RLock()
 
         os.makedirs(self.root, exist_ok=True)
@@ -68,12 +104,28 @@ class LocalIndexStorage(IndexStorageBackend):
         self.catalog = StorageCatalog(
             self.root
         )
+        self.metrics = StorageMetrics()
+        self.health_monitor = StorageHealthMonitor(self)
 
         self._recover()
 
         self._large_objects = LargeObjectStore(
             _DirectStorageAdapter(self)
         )
+
+        self._closed = False
+
+    def close(self):
+        with self._lock:
+            if self._closed:
+                return
+
+            self.catalog.compact()
+            self._closed = True
+
+    def _ensure_open(self):
+        if self._closed:
+            raise RuntimeError("storage is closed")
 
     def _path(self, key):
         if not isinstance(key, str):
@@ -83,6 +135,11 @@ class LocalIndexStorage(IndexStorageBackend):
 
         if not key:
             raise ValueError("key must not be empty")
+
+        if len(key) > self.max_key_length:
+            raise ValueError(
+                f"key exceeds maximum length: {self.max_key_length}"
+            )
 
         if os.path.isabs(key):
             raise ValueError("absolute keys are not allowed")
@@ -321,6 +378,15 @@ class LocalIndexStorage(IndexStorageBackend):
         if not isinstance(data, bytes):
             raise TypeError("data must be bytes")
 
+        if (
+            self.max_object_size is not None
+            and len(data) > self.max_object_size
+        ):
+            raise ValueError(
+                f"object exceeds maximum size: "
+                f"{self.max_object_size}"
+            )
+
         directory = os.path.dirname(path)
         os.makedirs(directory, exist_ok=True)
 
@@ -474,8 +540,22 @@ class LocalIndexStorage(IndexStorageBackend):
 
         return sorted(keys)
 
+    @_count_storage_errors
     def put(self, key, data):
+        self._ensure_open()
         with self._lock:
+            if not isinstance(data, bytes):
+                raise TypeError("data must be bytes")
+
+            if (
+                self.max_object_size is not None
+                and len(data) > self.max_object_size
+            ):
+                raise ValueError(
+                    f"object exceeds maximum size: "
+                    f"{self.max_object_size}"
+                )
+
             if self._large_objects.policy.is_large(data):
                 manifest = self._large_objects.put(
                     key,
@@ -487,6 +567,7 @@ class LocalIndexStorage(IndexStorageBackend):
                     manifest.to_dict(),
                 )
 
+                self.metrics.record_put()
                 return
 
             self._put_direct(key, data)
@@ -503,29 +584,44 @@ class LocalIndexStorage(IndexStorageBackend):
                 metadata.to_dict(),
             )
 
+            self.metrics.record_put()
+
+    @_count_storage_errors
     def get(self, key):
+        self._ensure_open()
         with self._lock:
             manifest_key = (
                 self._large_objects._manifest_key(key)
             )
 
             if self._exists_direct(manifest_key):
-                return self._large_objects.get(key)
+                data = self._large_objects.get(key)
+                self.metrics.record_get()
+                return data
 
-            return self._get_direct(key)
+            data = self._get_direct(key)
+            self.metrics.record_get()
+            return data
 
+    @_count_storage_errors
     def exists(self, key):
+        self._ensure_open()
         with self._lock:
             manifest_key = (
                 self._large_objects._manifest_key(key)
             )
 
             if self._exists_direct(manifest_key):
+                self.metrics.record_exists()
                 return True
 
-            return self._exists_direct(key)
+            result = self._exists_direct(key)
+            self.metrics.record_exists()
+            return result
 
+    @_count_storage_errors
     def delete(self, key):
+        self._ensure_open()
         with self._lock:
             manifest_key = (
                 self._large_objects._manifest_key(key)
@@ -536,12 +632,20 @@ class LocalIndexStorage(IndexStorageBackend):
 
                 if deleted:
                     self.catalog.delete(key)
+                    self.metrics.record_delete()
 
                 return deleted
 
-            return self._delete_direct(key)
+            deleted = self._delete_direct(key)
 
+            if deleted:
+                self.metrics.record_delete()
+
+            return deleted
+
+    @_count_storage_errors
     def list_keys(self, prefix=""):
+        self._ensure_open()
         with self._lock:
             return self.catalog.list_keys(
                 prefix

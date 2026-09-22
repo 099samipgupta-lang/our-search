@@ -77,3 +77,31 @@ def create_index_storage():
     raise RuntimeError(
         f"Unsupported OUR_SEARCH_STORAGE_MODE: {mode}"
     )
+
+
+class StorageConfigError(ValueError):
+    """Raised when storage configuration is invalid."""
+
+
+def validate_storage_config(
+    root,
+    max_object_size=None,
+    max_key_length=1024,
+):
+    if not isinstance(root, str) or not root.strip():
+        raise StorageConfigError(
+            "storage root must be a non-empty string"
+        )
+
+    if max_object_size is not None:
+        if not isinstance(max_object_size, int) or max_object_size <= 0:
+            raise StorageConfigError(
+                "max_object_size must be a positive integer"
+            )
+
+    if not isinstance(max_key_length, int) or max_key_length <= 0:
+        raise StorageConfigError(
+            "max_key_length must be a positive integer"
+        )
+
+    return True
