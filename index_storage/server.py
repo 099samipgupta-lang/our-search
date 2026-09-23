@@ -137,6 +137,16 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
+        if self.path.startswith("/phone-connectivity-test"):
+            self._send_json(
+                200,
+                {
+                    "status": "endpoint_ready",
+                    "service": "our_search_storage",
+                },
+            )
+            return
+
         if self.path == "/health":
 
             self._send_json(
