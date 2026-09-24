@@ -2,6 +2,8 @@ import socket
 import hmac
 import json
 import os
+import queue
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -43,8 +45,14 @@ storage = LocalIndexStorage(
     STORAGE_ROOT
 )
 
+REVERSE_COMMANDS = queue.Queue()
+REVERSE_RESPONSES = queue.Queue()
+REVERSE_PHONE_CONNECTED = threading.Event()
+
 
 class StorageHTTPHandler(BaseHTTPRequestHandler):
+
+    protocol_version = "HTTP/1.1"
 
     server_version = "OurSearchStorage/1.1"
 
@@ -189,11 +197,89 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             return
 
-        if self.path == "/reverse-test":
-            self._send_bytes(
-                200,
-                b"PING\\n",
+        if self.path == "/reverse-command":
+            if not self._require_auth():
+                return
+
+            length = int(
+                self.headers.get("Content-Length", "0")
             )
+
+            command = self.rfile.read(length).decode("utf-8").strip()
+
+            if not command:
+                self._send_json(
+                    400,
+                    {"error": "command_required"},
+                )
+                return
+
+            if not REVERSE_PHONE_CONNECTED.is_set():
+                self._send_json(
+                    503,
+                    {"error": "phone_not_connected"},
+                )
+                return
+
+            REVERSE_COMMANDS.put(command)
+
+            try:
+                result = REVERSE_RESPONSES.get(
+                    timeout=30
+                )
+            except queue.Empty:
+                self._send_json(
+                    504,
+                    {
+                        "error": "phone_response_timeout",
+                        "command": command,
+                    },
+                )
+                return
+
+            self._send_json(
+                200,
+                {
+                    "command": command,
+                    "result": result,
+                },
+            )
+            return
+
+        if self.path == "/reverse-test":
+            if not self._require_auth():
+                return
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Connection", "keep-alive")
+            self.end_headers()
+
+            REVERSE_PHONE_CONNECTED.set()
+
+            try:
+                while True:
+                    command = REVERSE_COMMANDS.get()
+
+                    payload = (
+                        command.encode("utf-8") + b"\\n"
+                    )
+
+                    chunk = (
+                        f"{len(payload):X}\\r\\n".encode("ascii")
+                        + payload
+                        + b"\\r\\n"
+                    )
+
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                REVERSE_PHONE_CONNECTED.clear()
+
             return
 
         if not self._require_auth():
@@ -275,6 +361,27 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             {
                 "error": "not_found",
             },
+        )
+
+    def do_POST(self):
+
+        if self.path == "/reverse-test-response":
+            if not self._require_auth():
+                return
+
+            result = self._read_body().decode("utf-8")
+
+            REVERSE_RESPONSES.put(result)
+
+            self._send_json(
+                200,
+                {"received": True},
+            )
+            return
+
+        self._send_json(
+            404,
+            {"error": "not_found"},
         )
 
     def do_PUT(self):
