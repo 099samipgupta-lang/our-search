@@ -168,45 +168,6 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):
 
-        if self.path.startswith("/phone-connectivity-test"):
-            target_host = "152.58.182.230"
-            target_port = 9090
-
-            try:
-                sock = socket.create_connection(
-                    (target_host, target_port),
-                    timeout=10,
-                )
-                sock.close()
-
-                self._send_json(
-                    200,
-                    {
-                        "status": "connection_success",
-                        "target": f"{target_host}:{target_port}",
-                    },
-                )
-            except Exception as e:
-                self._send_json(
-                    200,
-                    {
-                        "status": "connection_failed",
-                        "target": f"{target_host}:{target_port}",
-                        "error": str(e),
-                    },
-                )
-
-            return
-
-            self._send_json(
-                200,
-                {
-                    "status": "endpoint_ready",
-                    "service": "our_search_storage",
-                },
-            )
-            return
-
         if self.path == "/health":
 
             self._send_json(
@@ -220,31 +181,6 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/reverse-poll":
-            if not self._require_auth():
-                return
-
-            REVERSE_PHONE_CONNECTED.set()
-
-            try:
-                command = REVERSE_COMMANDS.get(
-                    timeout=25
-                )
-            except queue.Empty:
-                self._send_json(
-                    204,
-                    {},
-                )
-                return
-
-            self._send_json(
-                200,
-                {
-                    "command": command,
-                },
-            )
-            return
-
-        if self.path == "/reverse-test":
             if not self._require_auth():
                 return
 
@@ -423,7 +359,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/reverse-test-response":
+        if self.path == "/reverse-response":
             if not self._require_auth():
                 return
 
