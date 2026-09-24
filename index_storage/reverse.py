@@ -120,10 +120,18 @@ class ReverseIndexStorage(IndexStorageBackend):
     def exists(self, key):
 
         result = self._command(
-            "GET " + key
+            "EXISTS " + key
         )
 
-        return result != "NOT_FOUND"
+        if result == "TRUE":
+            return True
+
+        if result == "FALSE":
+            return False
+
+        raise RuntimeError(
+            "reverse storage EXISTS returned invalid result"
+        )
 
     def delete(self, key):
 
