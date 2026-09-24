@@ -201,6 +201,8 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             if not self._require_auth():
                 return
 
+            REVERSE_PHONE_CONNECTED.set()
+
             try:
                 command = REVERSE_COMMANDS.get(
                     timeout=25
