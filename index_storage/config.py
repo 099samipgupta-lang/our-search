@@ -1,6 +1,7 @@
 import os
 
 from index_storage.remote import RemoteIndexStorage
+from index_storage.reverse import ReverseIndexStorage
 from index_storage.supabase import SupabaseIndexStorage
 
 
@@ -40,6 +41,40 @@ def create_index_storage():
 
         return RemoteIndexStorage(
             base_url=base_url,
+            api_key=api_key,
+            timeout=timeout,
+        )
+
+    if mode == "reverse":
+        command_url = os.environ.get(
+            "OUR_SEARCH_STORAGE_REVERSE_URL"
+        )
+
+        api_key = os.environ.get(
+            "OUR_SEARCH_STORAGE_API_KEY"
+        )
+
+        if not command_url:
+            raise RuntimeError(
+                "OUR_SEARCH_STORAGE_REVERSE_URL is required "
+                "when OUR_SEARCH_STORAGE_MODE=reverse"
+            )
+
+        if not api_key:
+            raise RuntimeError(
+                "OUR_SEARCH_STORAGE_API_KEY is required "
+                "when OUR_SEARCH_STORAGE_MODE=reverse"
+            )
+
+        timeout = int(
+            os.environ.get(
+                "OUR_SEARCH_STORAGE_TIMEOUT",
+                "35",
+            )
+        )
+
+        return ReverseIndexStorage(
+            command_url=command_url,
             api_key=api_key,
             timeout=timeout,
         )

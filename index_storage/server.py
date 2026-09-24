@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from index_storage.local import LocalIndexStorage
+from index_storage.reverse import ReverseIndexStorage
 
 
 STORAGE_ROOT = os.environ.get(
@@ -41,9 +42,30 @@ if not STORAGE_API_KEY:
     )
 
 
-storage = LocalIndexStorage(
-    STORAGE_ROOT
-)
+if os.environ.get(
+    "OUR_SEARCH_STORAGE_MODE",
+    "local",
+).strip().lower() == "reverse":
+
+    storage = ReverseIndexStorage(
+        command_url=os.environ.get(
+            "OUR_SEARCH_STORAGE_REVERSE_URL",
+            "http://127.0.0.1:9090/reverse-command",
+        ),
+        api_key=STORAGE_API_KEY,
+        timeout=int(
+            os.environ.get(
+                "OUR_SEARCH_STORAGE_TIMEOUT",
+                "35",
+            )
+        ),
+    )
+
+else:
+
+    storage = LocalIndexStorage(
+        STORAGE_ROOT
+    )
 
 REVERSE_COMMANDS = queue.Queue()
 REVERSE_RESPONSES = queue.Queue()
