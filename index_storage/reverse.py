@@ -1,5 +1,5 @@
+import base64
 import json
-from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from index_storage.backend import IndexStorageBackend
@@ -79,11 +79,13 @@ class ReverseIndexStorage(IndexStorageBackend):
                 "data must be bytes"
             )
 
+        encoded = base64.b64encode(data).decode("ascii")
+
         result = self._command(
             "PUT "
             + key
             + " "
-            + data.decode("utf-8")
+            + encoded
         )
 
         if result != "OK":
@@ -100,7 +102,20 @@ class ReverseIndexStorage(IndexStorageBackend):
         if result == "NOT_FOUND":
             return None
 
-        return result.encode("utf-8")
+        if not result.startswith("DATA:"):
+            raise RuntimeError(
+                "reverse storage GET returned invalid data"
+            )
+
+        try:
+            return base64.b64decode(
+                result[5:].encode("ascii"),
+                validate=True,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                "reverse storage GET returned invalid Base64"
+            ) from exc
 
     def exists(self, key):
 
