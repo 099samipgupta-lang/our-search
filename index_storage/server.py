@@ -184,47 +184,25 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             if not self._require_auth():
                 return
 
-            self.send_response(200)
-            self.send_header("Content-Type", "text/plain")
-            self.send_header("Transfer-Encoding", "chunked")
-            self.send_header("Connection", "keep-alive")
-            self.end_headers()
-
             REVERSE_PHONE_CONNECTED.set()
 
-            ready = b"READY\\n"
-
-            ready_chunk = (
-                f"{len(ready):X}\\r\\n".encode("ascii")
-                + ready
-                + b"\\r\\n"
-            )
-
-            self.wfile.write(ready_chunk)
-            self.wfile.flush()
-
             try:
-                while True:
-                    command = REVERSE_COMMANDS.get()
+                command = REVERSE_COMMANDS.get(
+                    timeout=25
+                )
+            except queue.Empty:
+                self._send_json(
+                    204,
+                    {},
+                )
+                return
 
-                    payload = (
-                        command.encode("utf-8") + b"\\n"
-                    )
-
-                    chunk = (
-                        f"{len(payload):X}\\r\\n".encode("ascii")
-                        + payload
-                        + b"\\r\\n"
-                    )
-
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-
-            except (BrokenPipeError, ConnectionResetError):
-                pass
-            finally:
-                REVERSE_PHONE_CONNECTED.clear()
-
+            self._send_json(
+                200,
+                {
+                    "command": command,
+                },
+            )
             return
 
         if not self._require_auth():
