@@ -197,6 +197,29 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             return
 
+        if self.path == "/reverse-poll":
+            if not self._require_auth():
+                return
+
+            try:
+                command = REVERSE_COMMANDS.get(
+                    timeout=25
+                )
+            except queue.Empty:
+                self._send_json(
+                    204,
+                    {},
+                )
+                return
+
+            self._send_json(
+                200,
+                {
+                    "command": command,
+                },
+            )
+            return
+
         if self.path == "/reverse-command":
             if not self._require_auth():
                 return
