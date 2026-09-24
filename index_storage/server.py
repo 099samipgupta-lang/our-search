@@ -220,55 +220,6 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             )
             return
 
-        if self.path == "/reverse-command":
-            if not self._require_auth():
-                return
-
-            length = int(
-                self.headers.get("Content-Length", "0")
-            )
-
-            command = self.rfile.read(length).decode("utf-8").strip()
-
-            if not command:
-                self._send_json(
-                    400,
-                    {"error": "command_required"},
-                )
-                return
-
-            if not REVERSE_PHONE_CONNECTED.is_set():
-                self._send_json(
-                    503,
-                    {"error": "phone_not_connected"},
-                )
-                return
-
-            REVERSE_COMMANDS.put(command)
-
-            try:
-                result = REVERSE_RESPONSES.get(
-                    timeout=30
-                )
-            except queue.Empty:
-                self._send_json(
-                    504,
-                    {
-                        "error": "phone_response_timeout",
-                        "command": command,
-                    },
-                )
-                return
-
-            self._send_json(
-                200,
-                {
-                    "command": command,
-                    "result": result,
-                },
-            )
-            return
-
         if self.path == "/reverse-test":
             if not self._require_auth():
                 return
@@ -398,6 +349,55 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
         )
 
     def do_POST(self):
+
+        if self.path == "/reverse-command":
+            if not self._require_auth():
+                return
+
+            length = int(
+                self.headers.get("Content-Length", "0")
+            )
+
+            command = self.rfile.read(length).decode("utf-8").strip()
+
+            if not command:
+                self._send_json(
+                    400,
+                    {"error": "command_required"},
+                )
+                return
+
+            if not REVERSE_PHONE_CONNECTED.is_set():
+                self._send_json(
+                    503,
+                    {"error": "phone_not_connected"},
+                )
+                return
+
+            REVERSE_COMMANDS.put(command)
+
+            try:
+                result = REVERSE_RESPONSES.get(
+                    timeout=30
+                )
+            except queue.Empty:
+                self._send_json(
+                    504,
+                    {
+                        "error": "phone_response_timeout",
+                        "command": command,
+                    },
+                )
+                return
+
+            self._send_json(
+                200,
+                {
+                    "command": command,
+                    "result": result,
+                },
+            )
+            return
 
         if self.path == "/reverse-test-response":
             if not self._require_auth():
