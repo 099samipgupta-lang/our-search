@@ -258,6 +258,17 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             REVERSE_PHONE_CONNECTED.set()
 
+            ready = b"READY\\n"
+
+            ready_chunk = (
+                f"{len(ready):X}\\r\\n".encode("ascii")
+                + ready
+                + b"\\r\\n"
+            )
+
+            self.wfile.write(ready_chunk)
+            self.wfile.flush()
+
             try:
                 while True:
                     command = REVERSE_COMMANDS.get()
