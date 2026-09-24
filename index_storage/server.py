@@ -189,6 +189,13 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             return
 
+        if self.path == "/reverse-test":
+            self._send_bytes(
+                200,
+                b"PING\\n",
+            )
+            return
+
         if not self._require_auth():
             return
 
