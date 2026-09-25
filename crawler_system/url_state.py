@@ -4,6 +4,20 @@ import threading
 import time
 from typing import Any, Dict, List, Optional
 from crawler_system.ready_frontier import ReadyFrontier
+import tldextract
+
+
+def _organization_domain(host: str) -> str:
+    """Return the registrable domain used for organization-level scheduling."""
+
+    host = str(host).strip().lower().rstrip(".")
+
+    extracted = tldextract.extract(host)
+
+    if extracted.domain and extracted.suffix:
+        return f"{extracted.domain}.{extracted.suffix}"
+
+    return host
 
 
 class URLStateStore:
@@ -116,8 +130,14 @@ class URLStateStore:
                     leased_at REAL
                 );
 
+                CREATE TABLE IF NOT EXISTS organization_scheduler (
+                    organization_domain TEXT PRIMARY KEY,
+                    scheduler_last_claim REAL NOT NULL DEFAULT 0
+                );
+
                 CREATE TABLE IF NOT EXISTS hosts (
                     host TEXT PRIMARY KEY,
+                    organization_domain TEXT,
 
                     crawl_delay REAL NOT NULL DEFAULT 2.0,
 
@@ -128,7 +148,8 @@ class URLStateStore:
                     failures INTEGER NOT NULL DEFAULT 0,
                     active_concurrency INTEGER NOT NULL DEFAULT 0,
                     max_concurrency INTEGER NOT NULL DEFAULT 1,
-                    backoff_until REAL NOT NULL DEFAULT 0
+                    backoff_until REAL NOT NULL DEFAULT 0,
+                    scheduler_last_claim REAL NOT NULL DEFAULT 0
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_urls_state_priority
@@ -460,15 +481,31 @@ class URLStateStore:
                 )
             )
 
+            organization_domain = _organization_domain(host)
+
             self._connection.execute(
                 """
                 INSERT OR IGNORE INTO hosts (
-                    host
+                    host,
+                    organization_domain
+                )
+                VALUES (?, ?)
+                """,
+                (
+                    host,
+                    organization_domain,
+                )
+            )
+
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO organization_scheduler (
+                    organization_domain
                 )
                 VALUES (?)
                 """,
                 (
-                    host,
+                    organization_domain,
                 )
             )
 
@@ -739,20 +776,37 @@ class URLStateStore:
 
         with self._lock:
 
+            organization_domain = _organization_domain(host)
+
             self._connection.execute(
                 """
                 INSERT OR IGNORE INTO hosts (
                     host,
+                    organization_domain,
                     crawl_delay
                 )
                 VALUES (
+                    ?,
                     ?,
                     ?
                 )
                 """,
                 (
                     host,
+                    organization_domain,
                     float(crawl_delay),
+                )
+            )
+
+            self._connection.execute(
+                """
+                INSERT OR IGNORE INTO organization_scheduler (
+                    organization_domain
+                )
+                VALUES (?)
+                """,
+                (
+                    organization_domain,
                 )
             )
 
@@ -1238,16 +1292,24 @@ class URLStateStore:
             frontier_rows = self._connection.execute(
                 """
                 SELECT
-                    url,
-                    host,
-                    priority,
-                    ready_at,
-                    sequence
-                FROM ready_frontier
+                    rf.url,
+                    rf.host,
+                    rf.priority,
+                    rf.ready_at,
+                    rf.sequence
+                FROM ready_frontier AS rf
+                JOIN hosts AS h
+                  ON h.host = rf.host
+                JOIN organization_scheduler AS os
+                  ON os.organization_domain = h.organization_domain
+                WHERE
+                    h.active_concurrency < h.max_concurrency
                 ORDER BY
-                    priority DESC,
-                    ready_at ASC,
-                    sequence ASC
+                    os.scheduler_last_claim ASC,
+                    h.scheduler_last_claim ASC,
+                    rf.ready_at ASC,
+                    rf.priority DESC,
+                    rf.sequence ASC
                 LIMIT 256
                 """
             ).fetchall()
@@ -1402,6 +1464,50 @@ class URLStateStore:
             if url_cursor.rowcount != 1:
                 self._connection.rollback()
                 return None
+
+            organization_domain = str(
+                row["host"]
+            )
+
+            organization_row = self._connection.execute(
+                """
+                SELECT organization_domain
+                FROM hosts
+                WHERE host = ?
+                """,
+                (host,),
+            ).fetchone()
+
+            if organization_row is None:
+                self._connection.rollback()
+                raise RuntimeError(
+                    f"host disappeared after lease: {host}"
+                )
+
+            organization_domain = str(
+                organization_row["organization_domain"]
+            )
+
+            self._connection.execute(
+                """
+                UPDATE organization_scheduler
+                SET scheduler_last_claim = ?
+                WHERE organization_domain = ?
+                """,
+                (
+                    timestamp,
+                    organization_domain,
+                ),
+            )
+
+            self._connection.execute(
+                """
+                UPDATE hosts
+                SET scheduler_last_claim = ?
+                WHERE host = ?
+                """,
+                (timestamp, host),
+            )
 
             result = self._connection.execute(
                 """
