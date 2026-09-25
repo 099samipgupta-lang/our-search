@@ -460,10 +460,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
                         200,
                         {
                             "command": command,
-                            "result": "REQUEST "
-                            + request_id
-                            + " "
-                            + result,
+                            "result": result,
                         },
                     )
                     return
