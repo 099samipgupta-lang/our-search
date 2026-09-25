@@ -396,6 +396,24 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
                 )
                 return
 
+            if not command.startswith("REQUEST "):
+                self._send_json(
+                    400,
+                    {"error": "request_id_required"},
+                )
+                return
+
+            parts = command.split(" ", 2)
+
+            if len(parts) != 3:
+                self._send_json(
+                    400,
+                    {"error": "invalid_request_id_format"},
+                )
+                return
+
+            _, request_id, actual_command = parts
+
             if not REVERSE_PHONE_CONNECTED.is_set():
                 self._send_json(
                     503,
@@ -404,40 +422,79 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
                 return
 
             with REVERSE_COMMAND_LOCK:
-
                 REVERSE_COMMANDS.put(command)
 
-                try:
-                    result = REVERSE_RESPONSES.get(
-                        timeout=30
-                    )
-                except queue.Empty:
+                deadline = time.time() + 30
+
+                while True:
+                    remaining = deadline - time.time()
+
+                    if remaining <= 0:
+                        self._send_json(
+                            504,
+                            {
+                                "error": "phone_response_timeout",
+                                "command": command,
+                            },
+                        )
+                        return
+
+                    try:
+                        response_id, result = REVERSE_RESPONSES.get(
+                            timeout=remaining
+                        )
+                    except queue.Empty:
+                        self._send_json(
+                            504,
+                            {
+                                "error": "phone_response_timeout",
+                                "command": command,
+                            },
+                        )
+                        return
+
+                    if response_id != request_id:
+                        continue
+
                     self._send_json(
-                        504,
+                        200,
                         {
-                            "error": "phone_response_timeout",
                             "command": command,
+                            "result": "REQUEST "
+                            + request_id
+                            + " "
+                            + result,
                         },
                     )
                     return
-
-                self._send_json(
-                    200,
-                    {
-                        "command": command,
-                        "result": result,
-                    },
-                )
-
-            return
 
         if self.path == "/reverse-response":
             if not self._require_auth():
                 return
 
-            result = self._read_body().decode("utf-8")
+            result = self._read_body().decode("utf-8").strip()
 
-            REVERSE_RESPONSES.put(result)
+            if not result.startswith("REQUEST "):
+                self._send_json(
+                    400,
+                    {"error": "request_id_required"},
+                )
+                return
+
+            parts = result.split(" ", 2)
+
+            if len(parts) != 3:
+                self._send_json(
+                    400,
+                    {"error": "invalid_response_id_format"},
+                )
+                return
+
+            _, request_id, response = parts
+
+            REVERSE_RESPONSES.put(
+                (request_id, response)
+            )
 
             self._send_json(
                 200,

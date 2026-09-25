@@ -1,6 +1,7 @@
 import base64
 import json
 import threading
+import uuid
 from urllib.request import Request, urlopen
 
 from index_storage.backend import IndexStorageBackend
@@ -54,9 +55,18 @@ class ReverseIndexStorage(IndexStorageBackend):
 
         with self._command_lock:
 
+            request_id = uuid.uuid4().hex
+
+            wire_command = (
+                "REQUEST "
+                + request_id
+                + " "
+                + command
+            )
+
             request = Request(
                 self.command_url,
-                data=command.encode("utf-8"),
+                data=wire_command.encode("utf-8"),
                 method="POST",
                 headers={
                     "X-Storage-API-Key": self.api_key,
@@ -73,12 +83,21 @@ class ReverseIndexStorage(IndexStorageBackend):
                     response.read().decode("utf-8")
                 )
 
-            if payload.get("command") != command:
+            if payload.get("command") != wire_command:
                 raise RuntimeError(
                     "reverse storage command mismatch"
                 )
 
-            return payload.get("result", "")
+            result = payload.get("result", "")
+
+            prefix = "REQUEST " + request_id + " "
+
+            if not result.startswith(prefix):
+                raise RuntimeError(
+                    "reverse storage response mismatch"
+                )
+
+            return result[len(prefix):]
 
     def put(self, key, data):
 
