@@ -90,14 +90,7 @@ class ReverseIndexStorage(IndexStorageBackend):
 
             result = payload.get("result", "")
 
-            prefix = "REQUEST " + request_id + " "
-
-            if not result.startswith(prefix):
-                raise RuntimeError(
-                    "reverse storage response mismatch"
-                )
-
-            return result[len(prefix):]
+            return result
 
     def put(self, key, data):
 
