@@ -1,5 +1,6 @@
 import base64
 import json
+import threading
 from urllib.request import Request, urlopen
 
 from index_storage.backend import IndexStorageBackend
@@ -44,33 +45,40 @@ class ReverseIndexStorage(IndexStorageBackend):
             int(timeout),
         )
 
+        # The reverse storage protocol uses a shared response queue.
+        # Serialize commands so concurrent requests cannot receive
+        # another request's response.
+        self._command_lock = threading.Lock()
+
     def _command(self, command):
 
-        request = Request(
-            self.command_url,
-            data=command.encode("utf-8"),
-            method="POST",
-            headers={
-                "X-Storage-API-Key": self.api_key,
-                "Content-Type": "text/plain",
-            },
-        )
+        with self._command_lock:
 
-        with urlopen(
-            request,
-            timeout=self.timeout,
-        ) as response:
-
-            payload = json.loads(
-                response.read().decode("utf-8")
+            request = Request(
+                self.command_url,
+                data=command.encode("utf-8"),
+                method="POST",
+                headers={
+                    "X-Storage-API-Key": self.api_key,
+                    "Content-Type": "text/plain",
+                },
             )
 
-        if payload.get("command") != command:
-            raise RuntimeError(
-                "reverse storage command mismatch"
-            )
+            with urlopen(
+                request,
+                timeout=self.timeout,
+            ) as response:
 
-        return payload.get("result", "")
+                payload = json.loads(
+                    response.read().decode("utf-8")
+                )
+
+            if payload.get("command") != command:
+                raise RuntimeError(
+                    "reverse storage command mismatch"
+                )
+
+            return payload.get("result", "")
 
     def put(self, key, data):
 

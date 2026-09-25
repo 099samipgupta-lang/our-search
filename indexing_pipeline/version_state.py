@@ -108,17 +108,35 @@ class VersionState:
 
         if data.get(
             "format_version"
-        ) != self.FORMAT_VERSION:
+        ) == self.FORMAT_VERSION:
 
-            raise ValueError(
-                "Unsupported version state format"
+            self.documents = dict(
+                data.get(
+                    "documents",
+                    {}
+                )
             )
 
-        self.documents = dict(
-            data.get(
-                "documents",
-                {}
+            return
+
+        # Backward compatibility for older stored
+        # version-state objects without a format version.
+        if (
+            "format_version" not in data
+            and isinstance(
+                data.get("documents"),
+                dict
             )
+        ):
+
+            self.documents = dict(
+                data["documents"]
+            )
+
+            return
+
+        raise ValueError(
+            "Unsupported version state format"
         )
 
     def save_to_storage(

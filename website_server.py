@@ -4,6 +4,7 @@ import os
 import traceback
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+from urllib.request import urlopen
 
 from index_storage.repository import IndexStorageRepository
 from index_storage.config import create_index_storage
@@ -508,11 +509,30 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
         try:
 
-            result = search_service.search(
-                query=query,
-                mode="OR",
-                top_k=10,
+            from urllib.parse import urlencode
+
+            search_url = (
+                "http://127.0.0.1:8081/search?"
+                + urlencode({
+                    "q": query,
+                    "mode": "OR",
+                    "top_k": 10,
+                })
             )
+
+            with urlopen(
+                search_url,
+                timeout=10,
+            ) as response:
+                result = json.loads(
+                    response.read().decode("utf-8")
+                )
+
+            if isinstance(result.get("results"), dict):
+                result["results"] = result["results"].get(
+                    "results",
+                    [],
+                )
 
             self.send_html(
                 200,

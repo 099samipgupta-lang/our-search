@@ -9,6 +9,9 @@ from urllib.parse import parse_qs, urlparse
 
 from index_storage.local import LocalIndexStorage
 from index_storage.reverse import ReverseIndexStorage
+from index_storage.repository import IndexStorageRepository
+from indexing_pipeline.pipeline import CrawlIndexPipeline
+from search_service.service import SearchService
 
 
 STORAGE_ROOT = os.environ.get(
@@ -68,6 +71,25 @@ else:
     )
 
 REVERSE_COMMANDS = queue.Queue()
+
+# The reverse protocol has one shared response queue.
+# Only one /reverse-command request may be active at a time.
+REVERSE_COMMAND_LOCK = threading.Lock()
+
+# Existing persistent OUR SEARCH index/search execution.
+# This runs inside the existing 9090 Storage service.
+storage_repository = IndexStorageRepository(storage)
+search_pipeline = CrawlIndexPipeline(
+    root=STORAGE_ROOT,
+    storage=storage,
+    storage_repository=storage_repository,
+)
+search_service = SearchService(
+    search_pipeline.search_index,
+    search_pipeline.document_store,
+    indexing_pipeline=search_pipeline,
+)
+
 REVERSE_RESPONSES = queue.Queue()
 REVERSE_PHONE_CONNECTED = threading.Event()
 
@@ -216,6 +238,75 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             parsed.query
         )
 
+        if parsed.path == "/search":
+
+            q = query.get(
+                "q",
+                [""],
+            )[0].strip()
+
+            if not q:
+                self._send_json(
+                    400,
+                    {
+                        "error": "missing query parameter: q",
+                    },
+                )
+                return
+
+            mode = query.get(
+                "mode",
+                ["OR"],
+            )[0]
+
+            try:
+                top_k = int(
+                    query.get(
+                        "top_k",
+                        ["10"],
+                    )[0]
+                )
+            except ValueError:
+                self._send_json(
+                    400,
+                    {
+                        "error": "top_k must be an integer",
+                    },
+                )
+                return
+
+            top_k = max(
+                1,
+                min(top_k, 100),
+            )
+
+            try:
+                results = search_service.search(
+                    q,
+                    mode=mode,
+                    top_k=top_k,
+                )
+
+                self._send_json(
+                    200,
+                    {
+                        "query": q,
+                        "mode": mode,
+                        "results": results,
+                    },
+                )
+
+            except Exception as exc:
+                self._send_json(
+                    500,
+                    {
+                        "error": "search_failed",
+                        "message": str(exc),
+                    },
+                )
+
+            return
+
         if parsed.path == "/exists":
 
             key = query.get(
@@ -312,29 +403,32 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
                 )
                 return
 
-            REVERSE_COMMANDS.put(command)
+            with REVERSE_COMMAND_LOCK:
 
-            try:
-                result = REVERSE_RESPONSES.get(
-                    timeout=30
-                )
-            except queue.Empty:
+                REVERSE_COMMANDS.put(command)
+
+                try:
+                    result = REVERSE_RESPONSES.get(
+                        timeout=30
+                    )
+                except queue.Empty:
+                    self._send_json(
+                        504,
+                        {
+                            "error": "phone_response_timeout",
+                            "command": command,
+                        },
+                    )
+                    return
+
                 self._send_json(
-                    504,
+                    200,
                     {
-                        "error": "phone_response_timeout",
                         "command": command,
+                        "result": result,
                     },
                 )
-                return
 
-            self._send_json(
-                200,
-                {
-                    "command": command,
-                    "result": result,
-                },
-            )
             return
 
         if self.path == "/reverse-response":

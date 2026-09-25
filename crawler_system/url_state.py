@@ -97,6 +97,11 @@ class URLStateStore:
 
         with self._lock:
 
+            existing_host_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(hosts)").fetchall()}
+            if existing_host_columns and "organization_domain" not in existing_host_columns:
+                self._connection.execute("ALTER TABLE hosts ADD COLUMN organization_domain TEXT")
+            self._connection.execute("CREATE TABLE IF NOT EXISTS organization_scheduler (organization_domain TEXT PRIMARY KEY, scheduler_last_claim REAL NOT NULL DEFAULT 0)")
+
             self._connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS metadata (
