@@ -465,6 +465,17 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
                     if response_id != request_id:
                         continue
 
+                    # Defensive normalization: the phone tunnel may return
+                    # the request envelope even though /reverse-response
+                    # normally strips it before queueing.
+                    if result.startswith("REQUEST "):
+                        response_parts = result.split(" ", 2)
+                        if (
+                            len(response_parts) == 3
+                            and response_parts[1] == request_id
+                        ):
+                            result = response_parts[2]
+
                     self._send_json(
                         200,
                         {
