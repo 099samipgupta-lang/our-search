@@ -76,19 +76,28 @@ REVERSE_COMMANDS = queue.Queue()
 # Only one /reverse-command request may be active at a time.
 REVERSE_COMMAND_LOCK = threading.Lock()
 
-# Existing persistent OUR SEARCH index/search execution.
-# This runs inside the existing 9090 Storage service.
+# Search execution is only initialized when this process owns
+# the local index. Reverse mode is a storage-only service and
+# must not load the remote index during startup.
 storage_repository = IndexStorageRepository(storage)
-search_pipeline = CrawlIndexPipeline(
-    root=STORAGE_ROOT,
-    storage=storage,
-    storage_repository=storage_repository,
-)
-search_service = SearchService(
-    search_pipeline.search_index,
-    search_pipeline.document_store,
-    indexing_pipeline=search_pipeline,
-)
+
+if os.environ.get(
+    "OUR_SEARCH_STORAGE_MODE",
+    "local",
+).strip().lower() == "reverse":
+    search_pipeline = None
+    search_service = None
+else:
+    search_pipeline = CrawlIndexPipeline(
+        root=STORAGE_ROOT,
+        storage=storage,
+        storage_repository=storage_repository,
+    )
+    search_service = SearchService(
+        search_pipeline.search_index,
+        search_pipeline.document_store,
+        indexing_pipeline=search_pipeline,
+    )
 
 REVERSE_RESPONSES = queue.Queue()
 REVERSE_PHONE_CONNECTED = threading.Event()
