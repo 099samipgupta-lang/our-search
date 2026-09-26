@@ -220,7 +220,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
             try:
                 command = REVERSE_COMMANDS.get(
-                    timeout=25
+                    timeout=35
                 )
             except queue.Empty:
                 self._send_json(
