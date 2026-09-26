@@ -163,6 +163,19 @@ class PartitionedFrontier:
 
         return None
 
+    def get_next_batch(self, batch_size):
+        urls = []
+
+        for _ in range(batch_size):
+            url = self.get_next()
+
+            if url is None:
+                break
+
+            urls.append(url)
+
+        return urls
+
     def get_state(self, url: str):
         return self.state_store_for(url).get(url)
 
