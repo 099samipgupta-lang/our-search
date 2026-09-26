@@ -509,24 +509,12 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
         try:
 
-            from urllib.parse import urlencode
-
-            search_url = (
-                "http://127.0.0.1:8081/search?"
-                + urlencode({
-                    "q": query,
-                    "mode": "OR",
-                    "top_k": 10,
-                })
+            result = search_service.search(
+                query,
+                mode="OR",
+                top_k=10,
             )
 
-            with urlopen(
-                search_url,
-                timeout=10,
-            ) as response:
-                result = json.loads(
-                    response.read().decode("utf-8")
-                )
 
             if isinstance(result.get("results"), dict):
                 result["results"] = result["results"].get(
