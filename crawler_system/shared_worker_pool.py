@@ -13,7 +13,7 @@ def shared_worker_process(
     task_queue,
     result_queue,
 ):
-    fetcher = Fetcher(
+    fetcher = Fetcher(timeout=5.0,
         user_agent="OurSearchBot/1.0"
     )
 
@@ -36,6 +36,7 @@ def shared_worker_process(
         try:
             result = worker.process(task)
             result_queue.put(result)
+            print("WORKER_RESULT_QUEUED:", worker_id, task.url, flush=True)
 
         except Exception as error:
             response = {

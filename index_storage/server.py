@@ -434,34 +434,8 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             with REVERSE_COMMAND_LOCK:
                 REVERSE_COMMANDS.put(command)
 
-                deadline = time.time() + 30
-
                 while True:
-                    remaining = deadline - time.time()
-
-                    if remaining <= 0:
-                        self._send_json(
-                            504,
-                            {
-                                "error": "phone_response_timeout",
-                                "command": command,
-                            },
-                        )
-                        return
-
-                    try:
-                        response_id, result = REVERSE_RESPONSES.get(
-                            timeout=remaining
-                        )
-                    except queue.Empty:
-                        self._send_json(
-                            504,
-                            {
-                                "error": "phone_response_timeout",
-                                "command": command,
-                            },
-                        )
-                        return
+                    response_id, result = REVERSE_RESPONSES.get()
 
                     if response_id != request_id:
                         continue

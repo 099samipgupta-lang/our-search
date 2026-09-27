@@ -8,7 +8,7 @@ class RemoteCrawlerIndexBridge:
     def __init__(
         self,
         index_url,
-        timeout=30,
+        timeout=0,
     ):
 
         if not isinstance(index_url, str):
@@ -46,9 +46,10 @@ class RemoteCrawlerIndexBridge:
                 + "/flush"
             )
 
-        self.timeout = max(
-            1,
-            int(timeout)
+        self.timeout = (
+            None
+            if float(timeout) == 0
+            else max(1, int(timeout))
         )
 
         self.processed = 0
@@ -180,6 +181,12 @@ class RemoteCrawlerIndexBridge:
                     extracted["canonical_url"],
                 "flush": True,
             }
+
+            print(
+                "INDEX_REQUEST_URL:",
+                url,
+                flush=True
+            )
 
             result = self._post_json(
                 self.index_url,

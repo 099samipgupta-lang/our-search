@@ -19,6 +19,7 @@ class CrawlWorker:
     def process(self, task):
 
         self.tasks_processed += 1
+        print("WORKER_PROCESS:", self.worker_id, task.url, flush=True)
 
         if not self.policy.allow(task.url):
 

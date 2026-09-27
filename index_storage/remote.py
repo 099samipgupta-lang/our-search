@@ -12,7 +12,7 @@ class RemoteIndexStorage(IndexStorageBackend):
         self,
         base_url,
         api_key=None,
-        timeout=30,
+        timeout=0,
     ):
 
         if not isinstance(
@@ -40,7 +40,7 @@ class RemoteIndexStorage(IndexStorageBackend):
 
         self.base_url = base_url
         self.api_key = api_key
-        self.timeout = max(
+        self.timeout = None if float(timeout) == 0 else max(
             1,
             int(timeout),
         )
