@@ -779,7 +779,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 </p>
             </div>
 
-            {self.render_brain_experience(result)}
+            {self.render_brain_experience(response)}
 
             {results_html}
 
