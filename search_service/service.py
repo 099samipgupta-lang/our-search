@@ -55,6 +55,14 @@ class SearchService:
             "experience_version": experience[
                 "experience_version"
             ],
+            "brain_version": experience.get(
+                "brain_version",
+                "",
+            ),
+            "brain": experience.get(
+                "brain",
+                {},
+            ),
         }
 
     def index_document(self, payload):
