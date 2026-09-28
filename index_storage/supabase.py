@@ -1,4 +1,5 @@
 import json
+import time
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -61,6 +62,34 @@ class SupabaseIndexStorage(IndexStorageBackend):
             int(timeout),
         )
 
+    def _urlopen(self, request, timeout=None):
+        last_error = None
+
+        for attempt in range(4):
+            try:
+                return urlopen(
+                    request,
+                    timeout=timeout,
+                )
+            except HTTPError as error:
+                last_error = error
+
+                if error.code != 429 or attempt == 3:
+                    raise
+
+                retry_after = error.headers.get("Retry-After")
+
+                try:
+                    delay = float(retry_after)
+                except (TypeError, ValueError):
+                    delay = 2 ** attempt
+
+                time.sleep(
+                    min(max(delay, 1.0), 15.0)
+                )
+
+        raise last_error
+
     def _headers(self, extra=None):
 
         headers = {
@@ -109,7 +138,7 @@ class SupabaseIndexStorage(IndexStorageBackend):
             ),
         )
 
-        with urlopen(
+        with self._urlopen(
             request,
             timeout=self.timeout,
         ) as response:
@@ -126,7 +155,7 @@ class SupabaseIndexStorage(IndexStorageBackend):
 
         try:
 
-            with urlopen(
+            with self._urlopen(
                 request,
                 timeout=self.timeout,
             ) as response:
@@ -164,7 +193,7 @@ class SupabaseIndexStorage(IndexStorageBackend):
 
         try:
 
-            with urlopen(
+            with self._urlopen(
                 request,
                 timeout=self.timeout,
             ) as response:
@@ -188,7 +217,7 @@ class SupabaseIndexStorage(IndexStorageBackend):
 
         try:
 
-            with urlopen(
+            with self._urlopen(
                 request,
                 timeout=self.timeout,
             ) as response:
@@ -234,7 +263,7 @@ class SupabaseIndexStorage(IndexStorageBackend):
             ),
         )
 
-        with urlopen(
+        with self._urlopen(
             request,
             timeout=self.timeout,
         ) as response:
