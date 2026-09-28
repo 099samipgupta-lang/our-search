@@ -724,6 +724,10 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         rel="stylesheet"
         href="/style.css"
     >
+    <link
+        rel="stylesheet"
+        href="/experience.css"
+    >
 </head>
 
 <body class="search-page">
@@ -775,6 +779,8 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 </p>
             </div>
 
+            {self.render_brain_experience(result)}
+
             {results_html}
 
         </section>
@@ -784,6 +790,153 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 </body>
 </html>
 """
+
+    # --------------------------------------------------------
+    # OUR SEARCH Brain Experience
+    # --------------------------------------------------------
+
+    def render_brain_experience(self, result):
+        brain = result.get("brain", {})
+
+        if not isinstance(brain, dict) or not brain:
+            return ""
+
+        understanding = brain.get("understanding", {})
+        knowledge = brain.get("knowledge", {})
+        reasoning = brain.get("reasoning", {})
+        verification = brain.get("verification", {})
+        explanation = brain.get("explanation", {})
+        conversation = brain.get("conversation", {})
+        concepts = brain.get("concepts", [])
+
+        topic = html.escape(
+            str(
+                understanding.get(
+                    "normalized_query",
+                    result.get("query", ""),
+                )
+            )
+        )
+
+        concept_items = []
+
+        for concept in concepts:
+            if not isinstance(concept, dict):
+                continue
+
+            name = html.escape(
+                str(concept.get("name", ""))
+            )
+
+            if name:
+                concept_items.append(
+                    f'<span class="our-brain-concept">{name}</span>'
+                )
+
+        concepts_html = "".join(concept_items)
+
+        source_count = verification.get(
+            "source_count",
+            0,
+        )
+
+        verified = verification.get(
+            "verified",
+            False,
+        )
+
+        status = (
+            "Information found from search sources."
+            if verified
+            else "No supporting search sources were found."
+        )
+
+        safe_status = html.escape(status)
+
+        return f'''
+        <section class="our-brain-experience">
+            <div class="our-brain-label">
+                OUR SEARCH BRAIN
+            </div>
+
+            <h2 class="our-brain-title">
+                {topic}
+            </h2>
+
+            <p class="our-brain-status">
+                {safe_status}
+                Sources: {html.escape(str(source_count))}
+            </p>
+
+            <section class="our-brain-section">
+                <h3>Understanding</h3>
+                <p>
+                    {html.escape(str(
+                        understanding.get(
+                            "intent",
+                            "Query understood from the search request.",
+                        )
+                    ))}
+                </p>
+            </section>
+
+            <section class="our-brain-section">
+                <h3>Knowledge</h3>
+                <p>
+                    {html.escape(str(
+                        knowledge.get(
+                            "source_count",
+                            source_count,
+                        )
+                    ))}
+                    knowledge sources connected to this query.
+                </p>
+            </section>
+
+            <section class="our-brain-section">
+                <h3>Concepts</h3>
+                <div class="our-brain-concepts">
+                    {concepts_html}
+                </div>
+            </section>
+
+            <section class="our-brain-section">
+                <h3>Reasoning</h3>
+                <p>
+                    {html.escape(str(
+                        reasoning.get(
+                            "summary",
+                            "The brain organized the available information.",
+                        )
+                    ))}
+                </p>
+            </section>
+
+            <section class="our-brain-section">
+                <h3>Explanation</h3>
+                <p>
+                    {html.escape(str(
+                        explanation.get(
+                            "summary",
+                            "The available information was organized into an explanation.",
+                        )
+                    ))}
+                </p>
+            </section>
+
+            <section class="our-brain-section">
+                <h3>Conversation</h3>
+                <p>
+                    {html.escape(str(
+                        conversation.get(
+                            "query",
+                            result.get("query", ""),
+                        )
+                    ))}
+                </p>
+            </section>
+        </section>
+        '''
 
     # --------------------------------------------------------
     # Error page

@@ -1,0 +1,130 @@
+/* OUR SEARCH — Exploration Experience */
+
+.our-experience {
+    width: min(1000px, calc(100% - 32px));
+    margin: 28px auto 40px;
+}
+
+.our-experience-card {
+    padding: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 24px;
+    background: rgba(10, 22, 40, 0.78);
+    backdrop-filter: blur(20px);
+}
+
+.our-experience-label {
+    color: #48a9ff;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+}
+
+.our-experience-title {
+    color: #ffffff;
+    font-size: clamp(26px, 4vw, 42px);
+    line-height: 1.12;
+    margin-bottom: 24px;
+}
+
+.our-experience-visual {
+    min-height: 280px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 20px;
+    background:
+        radial-gradient(
+            circle at center,
+            rgba(72, 169, 255, 0.18),
+            rgba(1, 3, 10, 0.7) 65%
+        );
+    border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.our-experience-visual-content {
+    text-align: center;
+}
+
+.our-experience-visual-symbol {
+    font-size: 72px;
+    margin-bottom: 12px;
+}
+
+.our-experience-visual-text {
+    color: #9eabc0;
+    font-size: 14px;
+}
+
+.our-experience-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 18px 0 28px;
+}
+
+.our-experience-action {
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 12px;
+    padding: 10px 16px;
+    background: rgba(255, 255, 255, 0.04);
+    color: #f4f8ff;
+    cursor: pointer;
+}
+
+.our-experience-section {
+    padding-top: 22px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.our-experience-section + .our-experience-section {
+    margin-top: 22px;
+}
+
+.our-experience-heading {
+    color: #ffffff;
+    font-size: 17px;
+    margin-bottom: 10px;
+}
+
+.our-experience-text {
+    color: #9eabc0;
+    line-height: 1.7;
+    font-size: 15px;
+}
+
+.our-experience-explore {
+    display: grid;
+    gap: 10px;
+}
+
+.our-experience-topic {
+    display: block;
+    padding: 13px 15px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.035);
+    color: #dce8f8;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.our-experience-topic:hover {
+    border-color: rgba(72, 169, 255, 0.35);
+}
+
+@media (max-width: 600px) {
+    .our-experience {
+        width: min(100% - 20px, 1000px);
+        margin-top: 20px;
+    }
+
+    .our-experience-card {
+        padding: 18px;
+        border-radius: 18px;
+    }
+
+    .our-experience-visual {
+        min-height: 220px;
+    }
+}

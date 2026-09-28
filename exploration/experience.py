@@ -1,14 +1,22 @@
-from exploration.relationships import RelationshipEngine
+from exploration.brain import OurSearchBrain
 
 
 class ExplorationExperience:
-    EXPERIENCE_VERSION = "stage9.v1"
+    """
+    Main exploration layer of OUR SEARCH.
 
-    def __init__(self, relationship_engine=None):
-        self.relationships = (
-            relationship_engine
-            if relationship_engine is not None
-            else RelationshipEngine()
+    Search remains responsible for retrieving documents.
+    The OUR SEARCH brain operates on those results and builds
+    the richer conversational exploration response.
+    """
+
+    EXPERIENCE_VERSION = "stage9.brain.v2"
+
+    def __init__(self, brain=None):
+        self.brain = (
+            brain
+            if brain is not None
+            else OurSearchBrain()
         )
 
     def build(
@@ -29,18 +37,34 @@ class ExplorationExperience:
             if isinstance(item, dict)
         ]
 
-        related = []
+        brain_result = self.brain.think(
+            query=query,
+            results=primary,
+        )
 
-        if primary:
-            related = self.relationships.related_results(
-                primary[0],
-                primary,
-                limit=related_limit,
-            )
+        related = brain_result.relationships[
+            :max(0, int(related_limit))
+        ]
 
         return {
             "experience_version": self.EXPERIENCE_VERSION,
+            "brain_version": self.brain.VERSION,
             "query": query,
+
+            # Existing search results remain unchanged.
             "results": primary,
+
+            # Existing related-results interface remains.
             "related": related,
+
+            # New OUR SEARCH brain output.
+            "brain": {
+                "understanding": brain_result.understanding,
+                "knowledge": brain_result.knowledge,
+                "reasoning": brain_result.reasoning,
+                "verification": brain_result.verification,
+                "explanation": brain_result.explanation,
+                "conversation": brain_result.conversation,
+                "concepts": brain_result.concepts,
+            },
         }
