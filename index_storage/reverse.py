@@ -1,7 +1,9 @@
 import base64
 import json
 import threading
+import time
 import uuid
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from index_storage.backend import IndexStorageBackend
@@ -74,14 +76,41 @@ class ReverseIndexStorage(IndexStorageBackend):
                 },
             )
 
-            with urlopen(
-                request,
-                timeout=self.timeout,
-            ) as response:
+            payload = None
+            last_error = None
 
-                payload = json.loads(
-                    response.read().decode("utf-8")
-                )
+            for attempt in range(4):
+                try:
+                    with urlopen(
+                        request,
+                        timeout=self.timeout,
+                    ) as response:
+                        payload = json.loads(
+                            response.read().decode("utf-8")
+                        )
+                    break
+
+                except HTTPError as error:
+                    last_error = error
+
+                    if error.code != 429 or attempt == 3:
+                        raise
+
+                    retry_after = error.headers.get(
+                        "Retry-After"
+                    )
+
+                    try:
+                        delay = float(retry_after)
+                    except (TypeError, ValueError):
+                        delay = 2 ** attempt
+
+                    time.sleep(
+                        min(max(delay, 1.0), 15.0)
+                    )
+
+            if payload is None:
+                raise last_error
 
             if payload.get("command") != wire_command:
                 raise RuntimeError(
