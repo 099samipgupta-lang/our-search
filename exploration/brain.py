@@ -149,6 +149,215 @@ class ExplanationSystem:
         }
 
 
+class AnswerGenerationSystem:
+    """
+    Deterministic grounded answer construction layer.
+
+    This system turns retrieved search evidence into an actual
+    user-facing answer. It does not invent facts and does not
+    replace the search engine, crawler, index, or storage system.
+    """
+
+    QUESTION_WORDS = {
+        "what", "who", "where", "when", "why", "how",
+        "which", "can", "does", "do", "is", "are",
+        "was", "were", "will", "should", "could",
+    }
+
+    def _clean(self, value):
+        if value is None:
+            return ""
+
+        text = " ".join(str(value).split())
+        return text.strip()
+
+    def _question_type(self, query):
+        words = self._clean(query).casefold().split()
+
+        if not words:
+            return "general"
+
+        first = words[0]
+
+        if first in {"what", "who", "where", "when", "why", "how"}:
+            return first
+
+        if first in {"can", "could", "should", "will"}:
+            return "decision"
+
+        if first in {"is", "are", "was", "were", "does", "do"}:
+            return "yes_no"
+
+        return "general"
+
+    def _source_text(self, source):
+        title = self._clean(source.get("title", ""))
+        snippet = self._clean(source.get("snippet", ""))
+
+        if title and snippet:
+            return f"{title}: {snippet}"
+
+        return title or snippet
+
+    def _extract_evidence(self, query, sources, limit=5):
+        query_words = {
+            word.casefold().strip(".,!?;:()[]{}\"'")
+            for word in self._clean(query).split()
+            if len(word) > 2
+        }
+
+        candidates = []
+
+        for source in sources:
+            if not isinstance(source, dict):
+                continue
+
+            text = self._source_text(source)
+
+            if not text:
+                continue
+
+            lower = text.casefold()
+
+            overlap = sum(
+                1
+                for word in query_words
+                if word in lower
+            )
+
+            candidates.append(
+                (
+                    overlap,
+                    source.get("title", ""),
+                    source.get("url", ""),
+                    source.get("snippet", ""),
+                )
+            )
+
+        candidates.sort(
+            key=lambda item: (
+                item[0],
+                bool(item[2]),
+                bool(item[1]),
+            ),
+            reverse=True,
+        )
+
+        return [
+            {
+                "title": self._clean(item[1]),
+                "url": self._clean(item[2]),
+                "snippet": self._clean(item[3]),
+                "relevance": item[0],
+            }
+            for item in candidates[:max(1, int(limit))]
+        ]
+
+    def _build_from_evidence(
+        self,
+        query,
+        question_type,
+        evidence,
+    ):
+        if not evidence:
+            return (
+                "I couldn't find enough supporting information "
+                "in the current search results to answer that yet."
+            )
+
+        first = evidence[0]
+
+        title = first.get("title", "")
+        snippet = first.get("snippet", "")
+
+        if not snippet:
+            snippet = title
+
+        if not snippet:
+            return (
+                "I found search sources for this question, "
+                "but they do not contain enough readable information "
+                "to construct a reliable answer."
+            )
+
+        prefix = {
+            "what": "The search results indicate that",
+            "who": "The available sources identify",
+            "where": "The available sources indicate that",
+            "when": "The available sources indicate that",
+            "why": "The available sources explain that",
+            "how": "The available sources describe how",
+            "yes_no": "Based on the available sources,",
+            "decision": "Based on the available sources,",
+            "general": "Based on the available search sources,",
+        }.get(question_type, "Based on the available search sources,")
+
+        sentence = snippet.rstrip(" .")
+
+        if question_type in {"who", "what", "where", "when", "why", "how"}:
+            answer = f"{prefix} {sentence}."
+
+        else:
+            answer = f"{prefix} {sentence}."
+
+        if len(evidence) > 1:
+            supporting = []
+
+            for source in evidence[1:3]:
+                extra = source.get("snippet", "")
+                if extra:
+                    supporting.append(
+                        self._clean(extra).rstrip(" .")
+                    )
+
+            if supporting:
+                answer += " Additional search sources provide related information: "
+                answer += "; ".join(supporting) + "."
+
+        return answer
+
+    def generate(
+        self,
+        query,
+        knowledge,
+        reasoning,
+        verification,
+    ):
+        normalized_query = self._clean(query)
+        sources = knowledge.get("sources", [])
+
+        question_type = self._question_type(
+            normalized_query
+        )
+
+        evidence = self._extract_evidence(
+            normalized_query,
+            sources,
+            limit=5,
+        )
+
+        answer = self._build_from_evidence(
+            normalized_query,
+            question_type,
+            evidence,
+        )
+
+        return {
+            "answer": answer,
+            "question_type": question_type,
+            "evidence": evidence,
+            "source_count": len(sources),
+            "grounded": bool(evidence),
+            "reasoning_available": bool(
+                reasoning.get("structured")
+                or reasoning.get("has_sources")
+            ),
+            "verified_support": bool(
+                verification.get("verified")
+            ),
+        }
+
+
 class OurSearchBrain:
     """
     Central computational brain of OUR SEARCH.
@@ -246,6 +455,8 @@ class OurSearchBrain:
             if explanation_engine is not None
             else ExplanationEngine()
         )
+
+        self.answer_generation = AnswerGenerationSystem()
 
     def think(
         self,
@@ -356,11 +567,26 @@ class OurSearchBrain:
             "structured": structured_explanation,
         }
 
+        generated_answer = self.answer_generation.generate(
+            query=context.query,
+            knowledge=knowledge,
+            reasoning=reasoning,
+            verification=verification,
+        )
+
         conversation = self.conversation.build_answer(
             query=context.query,
             explanation=explanation,
             verification=verification,
         )
+
+        conversation = {
+            **conversation,
+            "answer": generated_answer["answer"],
+            "question_type": generated_answer["question_type"],
+            "evidence": generated_answer["evidence"],
+            "grounded": generated_answer["grounded"],
+        }
 
         return BrainResult(
             query=context.query,
@@ -390,5 +616,6 @@ __all__ = [
     "ReasoningEngine",
     "VerificationEngine",
     "ExplanationEngine",
+    "AnswerGenerationSystem",
     "OurSearchBrain",
 ]
