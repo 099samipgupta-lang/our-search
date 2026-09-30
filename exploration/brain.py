@@ -596,12 +596,33 @@ class OurSearchBrain:
             verification=verification,
         )
 
+        runtime_answer = knowledge_runtime_result.answer
+
+        if (
+            isinstance(runtime_answer, dict)
+            and runtime_answer.get("grounded")
+            and str(runtime_answer.get("answer", "")).strip()
+        ):
+            visible_answer = runtime_answer["answer"]
+            visible_evidence = runtime_answer.get(
+                "evidence",
+                generated_answer["evidence"],
+            )
+            visible_grounded = runtime_answer.get(
+                "grounded",
+                True,
+            )
+        else:
+            visible_answer = generated_answer["answer"]
+            visible_evidence = generated_answer["evidence"]
+            visible_grounded = generated_answer["grounded"]
+
         conversation = {
             **conversation,
-            "answer": generated_answer["answer"],
+            "answer": visible_answer,
             "question_type": generated_answer["question_type"],
-            "evidence": generated_answer["evidence"],
-            "grounded": generated_answer["grounded"],
+            "evidence": visible_evidence,
+            "grounded": visible_grounded,
         }
 
         return BrainResult(
