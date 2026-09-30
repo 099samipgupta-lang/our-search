@@ -3,6 +3,7 @@ from typing import Any
 
 from exploration.relationships import RelationshipEngine
 from exploration.conversation import ConversationSystem
+from exploration.knowledge.runtime import KnowledgeRuntimeEngine
 from exploration.concepts import ConceptSystem
 from exploration.reasoning import ReasoningEngine
 from exploration.verification import VerificationEngine
@@ -457,6 +458,10 @@ class OurSearchBrain:
         )
 
         self.answer_generation = AnswerGenerationSystem()
+        # Complete internal knowledge architecture.
+        # This coordinates the entire exploration/knowledge system.
+        self.knowledge_runtime = KnowledgeRuntimeEngine()
+
 
     def think(
         self,
@@ -567,6 +572,15 @@ class OurSearchBrain:
             "structured": structured_explanation,
         }
 
+        # Run the complete internal knowledge architecture.
+        knowledge_runtime_result = self.knowledge_runtime.think(
+            query=context.query
+        )
+
+        # Prefer the internal knowledge system when it produces a grounded
+        # answer. Existing web/search evidence remains available as fallback.
+        internal_answer = knowledge_runtime_result.answer
+
         generated_answer = self.answer_generation.generate(
             query=context.query,
             knowledge=knowledge,
@@ -597,6 +611,8 @@ class OurSearchBrain:
             verification=verification,
             explanation=explanation,
             conversation=conversation,
+            knowledge_runtime=knowledge_runtime_result,
+            internal_answer=internal_answer,
             concepts=concept_data,
         )
 
