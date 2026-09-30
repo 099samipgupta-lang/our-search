@@ -4,6 +4,7 @@ from typing import Any
 from exploration.relationships import RelationshipEngine
 from exploration.conversation import ConversationSystem
 from exploration.knowledge.runtime import KnowledgeRuntimeEngine
+from exploration.language_core.core import LanguageBrain
 from exploration.concepts import ConceptSystem
 from exploration.reasoning import ReasoningEngine
 from exploration.verification import VerificationEngine
@@ -460,6 +461,8 @@ class OurSearchBrain:
         )
 
         self.answer_generation = AnswerGenerationSystem()
+        # Learned language model subsystem.
+        self.language_brain = LanguageBrain()
         # Complete internal knowledge architecture.
         # This coordinates the entire exploration/knowledge system.
         self.knowledge_runtime = KnowledgeRuntimeEngine()
@@ -617,12 +620,39 @@ class OurSearchBrain:
             visible_evidence = generated_answer["evidence"]
             visible_grounded = generated_answer["grounded"]
 
+        # Use the learned language model to express the grounded
+        # answer naturally, while keeping the existing brain systems
+        # responsible for knowledge and grounding.
+        language_prompt = (
+            "You are the language generation subsystem of OUR SEARCH. "
+            "Rewrite the supplied answer naturally and clearly. "
+            "Do not add facts that are not present in the supplied answer. "
+            "If the supplied answer says there is not enough knowledge, "
+            "preserve that limitation.\n\n"
+            f"User question: {context.query}\n"
+            f"Grounded answer: {visible_answer}\n"
+            "Natural answer:"
+        )
+
+        language_response = self.language_brain.runtime.generate(
+            language_prompt,
+            max_tokens=128,
+        )
+
+        if str(language_response).strip():
+            visible_answer = language_response.strip()
+
         conversation = {
             **conversation,
             "answer": visible_answer,
             "question_type": generated_answer["question_type"],
             "evidence": visible_evidence,
             "grounded": visible_grounded,
+            "language_model": {
+                "version": self.language_brain.VERSION,
+                "runtime": self.language_brain.runtime.VERSION,
+                "learned_model": True,
+            },
         }
 
         return BrainResult(
