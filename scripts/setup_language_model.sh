@@ -8,7 +8,7 @@ mkdir -p "$ROOT/models"
 if [ ! -x "$ROOT/llama.cpp/build/bin/llama" ]; then
     rm -rf "$ROOT/llama.cpp"
     git clone --depth 1 https://github.com/ggml-org/llama.cpp.git "$ROOT/llama.cpp"
-    cmake -S "$ROOT/llama.cpp" -B "$ROOT/llama.cpp/build" -DCMAKE_BUILD_TYPE=Release
+    cmake -S "$ROOT/llama.cpp" -B "$ROOT/llama.cpp/build" -DCMAKE_BUILD_TYPE=Release -DGGML_NATIVE=OFF
     cmake --build "$ROOT/llama.cpp/build" --config Release -j2
 fi
 
