@@ -672,13 +672,14 @@ class OurSearchBrain:
             "Natural answer:"
         )
 
-        language_response = self.language_brain.runtime.generate(
-            language_prompt,
-            max_tokens=128,
-        )
+        if not is_greeting:
+            language_response = self.language_brain.runtime.generate(
+                language_prompt,
+                max_tokens=128,
+            )
 
-        if str(language_response).strip():
-            visible_answer = language_response.strip()
+            if str(language_response).strip():
+                visible_answer = language_response.strip()
 
         conversation = {
             **conversation,
