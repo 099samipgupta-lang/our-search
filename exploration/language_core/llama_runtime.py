@@ -45,7 +45,9 @@ class LlamaRuntime:
         if result.returncode != 0:
             raise RuntimeError(
                 f"llama.cpp failed with code {result.returncode}: "
-                f"{result.stderr.strip()}"
+                f"stdout={result.stdout.strip()!r} "
+                f"stderr={result.stderr.strip()!r} "
+                f"command={command!r}"
             )
 
         output = result.stdout + "\n" + result.stderr
