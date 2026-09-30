@@ -174,8 +174,8 @@ class LogicCapabilityEngine:
         text = self._normalize(query)
 
         return (
-            "if " in text
-            and " then " in text
-        ) or " implies " in text
-        or " means " in text
-        or "leads to" in text
+            ("if " in text and " then " in text)
+            or " implies " in text
+            or " means " in text
+            or "leads to" in text
+        )
