@@ -31,8 +31,10 @@ class LlamaRuntime:
             "--single-turn",
             "--simple-io",
             "--no-display-prompt",
+            "--reasoning-budget",
+            "0",
             "-p",
-            str(prompt) + "\n/no_think",
+            str(prompt),
         ]
 
         result = subprocess.run(
