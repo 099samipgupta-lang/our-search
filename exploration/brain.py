@@ -486,7 +486,34 @@ class OurSearchBrain:
             context.query
         )
 
-        retrieved = self.retrieval.retrieve(context)
+        greeting_words = {
+            "hi",
+            "hello",
+            "hey",
+            "hiya",
+            "yo",
+            "howdy",
+        }
+
+        normalized_words = set(
+            understanding.get("words", [])
+        )
+
+        is_greeting = bool(
+            normalized_words
+            and normalized_words.issubset(greeting_words)
+        )
+
+        understanding = {
+            **understanding,
+            "intent": "greeting" if is_greeting else "search",
+            "is_greeting": is_greeting,
+        }
+
+        if is_greeting:
+            retrieved = []
+        else:
+            retrieved = self.retrieval.retrieve(context)
 
         knowledge = self.knowledge.collect(
             BrainContext(
@@ -586,12 +613,23 @@ class OurSearchBrain:
         # answer. Existing web/search evidence remains available as fallback.
         internal_answer = knowledge_runtime_result.answer
 
-        generated_answer = self.answer_generation.generate(
-            query=context.query,
-            knowledge=knowledge,
-            reasoning=reasoning,
-            verification=verification,
-        )
+        if is_greeting:
+            generated_answer = {
+                "answer": "Hi! How are you doing?",
+                "question_type": "greeting",
+                "evidence": [],
+                "source_count": 0,
+                "grounded": True,
+                "reasoning_available": False,
+                "verified_support": False,
+            }
+        else:
+            generated_answer = self.answer_generation.generate(
+                query=context.query,
+                knowledge=knowledge,
+                reasoning=reasoning,
+                verification=verification,
+            )
 
         conversation = self.conversation.build_answer(
             query=context.query,
