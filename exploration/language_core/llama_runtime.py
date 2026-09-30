@@ -32,7 +32,7 @@ class LlamaRuntime:
             "--simple-io",
             "--no-display-prompt",
             "-p",
-            str(prompt),
+            str(prompt) + "\n/no_think",
         ]
 
         result = subprocess.run(
@@ -51,12 +51,33 @@ class LlamaRuntime:
             )
 
         output = result.stdout + "\n" + result.stderr
+
+        if "[Start thinking]" in output:
+            if "[End thinking]" in output:
+                output = output.split("[End thinking]", 1)[1]
+            else:
+                output = output.split("[Start thinking]", 1)[1]
+
         if "Assistant:" in output:
             output = output.split("Assistant:", 1)[1]
-        if "[Start thinking]" in output and "[End thinking]" in output:
-            output = output.split("[End thinking]", 1)[1]
+
         if "[ Prompt:" in output:
             output = output.split("[ Prompt:", 1)[0]
+
         if "Exiting..." in output:
             output = output.split("Exiting...", 1)[0]
-        return output.strip()
+
+        lines = []
+        for line in output.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            if stripped.startswith(("build :", "model :", "ftype :", "modalities :")):
+                continue
+            if stripped == "available commands:":
+                continue
+            if stripped.startswith(("/exit", "/regen", "/clear", "/read", "/glob")):
+                continue
+            lines.append(line)
+
+        return "\n".join(lines).strip()
