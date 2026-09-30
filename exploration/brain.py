@@ -27,6 +27,8 @@ class BrainResult:
     explanation: dict[str, Any]
     conversation: dict[str, Any]
     concepts: list[dict[str, Any]]
+    knowledge_runtime: dict[str, Any]
+    internal_answer: str
 
 
 class LanguageSystem:
