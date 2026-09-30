@@ -495,13 +495,29 @@ class OurSearchBrain:
             "howdy",
         }
 
+        greeting_phrases = {
+            ("hi", "bro"),
+            ("hello", "bro"),
+            ("hey", "bro"),
+            ("hi", "there"),
+            ("hello", "there"),
+            ("hey", "there"),
+        }
+
         normalized_words = set(
+            understanding.get("words", [])
+        )
+
+        normalized_sequence = tuple(
             understanding.get("words", [])
         )
 
         is_greeting = bool(
             normalized_words
-            and normalized_words.issubset(greeting_words)
+            and (
+                normalized_words.issubset(greeting_words)
+                or normalized_sequence in greeting_phrases
+            )
         )
 
         understanding = {
