@@ -5,6 +5,7 @@ from exploration.relationships import RelationshipEngine
 from exploration.conversation import ConversationSystem
 from exploration.knowledge.runtime import KnowledgeRuntimeEngine
 from exploration.language_core.core import LanguageBrain
+from exploration.learning.storage_offload.conversation_memory import ConversationMemory
 from exploration.concepts import ConceptSystem
 from exploration.reasoning import ReasoningEngine
 from exploration.verification import VerificationEngine
@@ -463,6 +464,7 @@ class OurSearchBrain:
         self.answer_generation = AnswerGenerationSystem()
         # Learned language model subsystem.
         self.language_brain = LanguageBrain()
+        self.conversation_memory = ConversationMemory()
         # Complete internal knowledge architecture.
         # This coordinates the entire exploration/knowledge system.
         self.knowledge_runtime = KnowledgeRuntimeEngine()
@@ -629,7 +631,21 @@ class OurSearchBrain:
         # answer. Existing web/search evidence remains available as fallback.
         internal_answer = knowledge_runtime_result.answer
 
-        if is_greeting:
+        conversation_memory_answer = self.conversation_memory.lookup(
+            context.query
+        )
+
+        if conversation_memory_answer is not None:
+            generated_answer = {
+                "answer": conversation_memory_answer,
+                "question_type": "conversation",
+                "evidence": [],
+                "source_count": 0,
+                "grounded": True,
+                "reasoning_available": False,
+                "verified_support": False,
+            }
+        elif is_greeting:
             generated_answer = {
                 "answer": "Hi! How are you doing?",
                 "question_type": "greeting",
