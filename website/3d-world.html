@@ -108,7 +108,7 @@ try {
 
   renderer.setSize(innerWidth, innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
-  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.enabled = false;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -120,7 +120,7 @@ try {
 
   const sun = new THREE.DirectionalLight(0xffdfb0, 3.5);
   sun.position.set(-90, 150, 70);
-  sun.castShadow = true;
+  sun.castShadow = false;
   sun.shadow.mapSize.set(512, 512);
   sun.shadow.camera.left = -100;
   sun.shadow.camera.right = 100;
@@ -242,7 +242,7 @@ try {
     }
 
     // Repeated window rows on all four sides.
-    const floors = Math.min(6,Math.floor(h/2.8));
+    const floors = 0;
     const columns = Math.min(3,Math.max(2,Math.floor(w/2.5)));
 
     for (let f=0; f<floors; f++) {
@@ -275,15 +275,15 @@ try {
   }
 
   // Blocks distributed around the player's starting street.
-  for (let gx=-7; gx<=7; gx++) {
-    for (let gz=-9; gz<=9; gz++) {
+  for (let gx=-5; gx<=5; gx++) {
+    for (let gz=-6; gz<=6; gz++) {
       const bx=gx*blockStep;
       const bz=gz*blockStep;
 
       // Keep the starting area open so the player is immediately visible.
       if (Math.abs(bx)<17 && Math.abs(bz)<24) continue;
 
-      const count=2+Math.floor(rand()*3);
+      const count=1+Math.floor(rand()*2);
 
       for (let n=0;n<count;n++) {
         const w=7+rand()*7;
