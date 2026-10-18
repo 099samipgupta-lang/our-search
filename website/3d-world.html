@@ -108,8 +108,8 @@ try {
 
   renderer.setSize(innerWidth, innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
-  renderer.shadowMap.enabled = false;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.18;
@@ -120,12 +120,15 @@ try {
 
   const sun = new THREE.DirectionalLight(0xffd09a, 3.0);
   sun.position.set(-90, 150, 70);
-  sun.castShadow = false;
+  sun.castShadow = true;
   sun.shadow.mapSize.set(512, 512);
   sun.shadow.camera.left = -100;
   sun.shadow.camera.right = 100;
   sun.shadow.camera.top = 100;
   sun.shadow.camera.bottom = -100;
+  sun.shadow.camera.near = 1;
+  sun.shadow.camera.far = 320;
+  sun.shadow.normalBias = 0.035;
   sun.shadow.bias = -0.0003;
   scene.add(sun);
 
@@ -157,7 +160,7 @@ try {
     );
     mesh.position.set(x,y,z);
     mesh.castShadow = cast;
-    mesh.receiveShadow = false;
+    mesh.receiveShadow = true;
     scene.add(mesh);
     return mesh;
   }
@@ -172,46 +175,127 @@ try {
     return mesh;
   }
 
-  // CITY GROUND
-  const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(1000,1000),
-    mat(0x727b78)
-  );
-  ground.rotation.x = -Math.PI/2;
-  ground.position.y = -0.12;
-  ground.receiveShadow = true;
-  scene.add(ground);
+  // CONTINUOUS SAN FRANCISCO TERRAIN
+  // Shared elevation function for terrain, roads and building placement.
+  function hill(x, z) {
+    return (
+      Math.sin(x * 0.012) * 5.5 +
+      Math.sin(z * 0.017) * 4.5 +
+      Math.sin((x + z) * 0.009) * 2.5 +
+      Math.sin((x - z) * 0.006) * 1.8
+    );
+  }
 
-  // Street grid, intersections and lane markings.
-  const roadWidth = 12;
-  const blockStep = 38;
+  // Subdivided terrain with real elevation.
+  const terrainSize = 1000;
+  const terrainSegments = 160;
+  const terrainPositions = [];
+  const terrainIndices = [];
 
-  for (let i=-12; i<=12; i++) {
-    const p = i * blockStep;
+  for (let iz = 0; iz <= terrainSegments; iz++) {
+    const z = -terrainSize / 2 + terrainSize * iz / terrainSegments;
 
-    box(roadWidth,0.12,900,asphalt,p,0,0,false);
-    box(900,0.12,roadWidth,asphalt,0,0.005,p,false);
-
-    // Double lane markings.
-    for (const offset of [-1.2,1.2]) {
-      box(0.12,0.025,900,whiteLine,p+offset,0.07,0,false);
-      box(900,0.025,0.12,whiteLine,0,0.075,p+offset,false);
-    }
-
-    // Sidewalks along both sides of each street.
-    for (const side of [-1,1]) {
-      box(2,0.32,900,sidewalk,p+side*7.2,0.08,0,false);
-      box(900,0.32,2,sidewalk,0,0.08,p+side*7.2,false);
+    for (let ix = 0; ix <= terrainSegments; ix++) {
+      const x = -terrainSize / 2 + terrainSize * ix / terrainSegments;
+      terrainPositions.push(x, hill(x, z) - 0.28, z);
     }
   }
 
-  // A subtle hill profile inspired by San Francisco's streets.
-  // Buildings remain aligned to the street grid for this prototype.
-  function hill(x,z) {
-    return Math.max(0,
-      Math.sin(x*0.008)*Math.cos(z*0.006)*5 +
-      Math.sin(z*0.014)*2
+  for (let iz = 0; iz < terrainSegments; iz++) {
+    for (let ix = 0; ix < terrainSegments; ix++) {
+      const a = iz * (terrainSegments + 1) + ix;
+      const b = a + 1;
+      const c = a + terrainSegments + 1;
+      const d = c + 1;
+      terrainIndices.push(a, c, b, b, c, d);
+    }
+  }
+
+  const terrainGeometry = new THREE.BufferGeometry();
+  terrainGeometry.setAttribute(
+    "position",
+    new THREE.Float32BufferAttribute(terrainPositions, 3)
+  );
+  terrainGeometry.setIndex(terrainIndices);
+  terrainGeometry.computeVertexNormals();
+
+  const terrain = new THREE.Mesh(
+    terrainGeometry,
+    mat(0x777b73, 0.96)
+  );
+  terrain.receiveShadow = true;
+  scene.add(terrain);
+
+  // Roads, lane markings and sidewalks follow the terrain elevation.
+  function makeRibbon(width, length, axis, center, material, yOffset) {
+    const segments = Math.ceil(length / 4);
+    const positions = [];
+    const indices = [];
+
+    for (let i = 0; i <= segments; i++) {
+      const along = -length / 2 + length * i / segments;
+
+      for (const side of [-1, 1]) {
+        let x, z;
+
+        if (axis === "z") {
+          x = center + side * width / 2;
+          z = along;
+        } else {
+          x = along;
+          z = center + side * width / 2;
+        }
+
+        positions.push(x, hill(x, z) + yOffset, z);
+      }
+    }
+
+    for (let i = 0; i < segments; i++) {
+      const a = i * 2;
+      const b = a + 1;
+      const c = a + 2;
+      const d = a + 3;
+
+      if (axis === "z") {
+        indices.push(a, c, b, b, c, d);
+      } else {
+        indices.push(a, b, c, b, d, c);
+      }
+    }
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(positions, 3)
     );
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    return mesh;
+  }
+
+  const roadWidth = 12;
+  const blockStep = 38;
+  const roadLength = 900;
+
+  for (let i = -12; i <= 12; i++) {
+    const p = i * blockStep;
+
+    makeRibbon(roadWidth, roadLength, "z", p, asphalt, 0.055);
+    makeRibbon(roadWidth, roadLength, "x", p, asphalt, 0.055);
+
+    for (const offset of [-1.2, 1.2]) {
+      makeRibbon(0.12, roadLength, "z", p + offset, whiteLine, 0.105);
+      makeRibbon(0.12, roadLength, "x", p + offset, whiteLine, 0.105);
+    }
+
+    for (const side of [-1, 1]) {
+      makeRibbon(2, roadLength, "z", p + side * 7.2, sidewalk, 0.13);
+      makeRibbon(2, roadLength, "x", p + side * 7.2, sidewalk, 0.13);
+    }
   }
 
   // CITY BUILDINGS: deterministic layout, not random every reload.
@@ -498,11 +582,11 @@ try {
   );
 
   // Player starts in the middle of the street.
-  player.position.set(0, 0, 8);
+  player.position.set(0, hill(0, 8) + 0.055, 8);
 
   // Third-person camera: always starts behind the character.
-  camera.position.set(0,4.3,15);
-  camera.lookAt(0,1.3,8);
+  camera.position.set(0, hill(0, 8) + 4.3, 15);
+  camera.lookAt(0, hill(0, 8) + 1.3, 8);
 
   const keys=new Set();
   let heading=0;
@@ -560,6 +644,7 @@ try {
       const speed=9*dt*moving;
       player.position.x+=Math.sin(heading)*speed;
       player.position.z-=Math.cos(heading)*speed;
+      player.position.y=hill(player.position.x, player.position.z) + 0.055;
 
       walkTime+=dt*11;
       leftArm.rotation.x=Math.sin(walkTime)*0.65;
