@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#030814">
+    <title>3D Interactive World | Our Search</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --bg: #030814;
+            --muted: #9eabc0;
+            --blue: #48a9ff;
+            --purple: #8b7cff;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            color: #f4f8ff;
+            background:
+                radial-gradient(ellipse at 50% 42%, rgba(0, 90, 180, .18), transparent 55%),
+                radial-gradient(ellipse at 50% 100%, rgba(83, 44, 180, .12), transparent 50%),
+                var(--bg);
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        }
+
+        a { color: inherit; text-decoration: none; }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            width: min(1200px, calc(100% - 36px));
+            margin: auto;
+            padding: 22px 0;
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 750;
+        }
+
+        .brand-mark {
+            width: 28px;
+            height: 28px;
+            border-radius: 9px;
+            background: linear-gradient(135deg, var(--blue), var(--purple));
+            box-shadow: 0 0 24px #48a9ff35;
+        }
+
+        .back-link {
+            padding: 9px 13px;
+            border: 1px solid #ffffff1c;
+            border-radius: 11px;
+            color: #c4d2e6;
+            font-size: 13px;
+        }
+
+        main {
+            width: min(1100px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 24px 0 60px;
+            text-align: center;
+        }
+
+        .eyebrow {
+            color: #80caff;
+            font-size: 11px;
+            font-weight: 750;
+            letter-spacing: 4px;
+        }
+
+        h1 {
+            margin: 13px 0 12px;
+            font-size: clamp(34px, 6vw, 62px);
+            line-height: 1.05;
+            letter-spacing: -2px;
+        }
+
+        h1 span {
+            color: #88bfff;
+            background: linear-gradient(90deg, #67d5ff, #a18aff);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .intro {
+            max-width: 590px;
+            margin: 0 auto;
+            color: var(--muted);
+            line-height: 1.7;
+            font-size: 14px;
+        }
+
+        .globe-shell {
+            position: relative;
+            width: min(680px, 100%);
+            margin: 18px auto 0;
+            aspect-ratio: 1 / 0.88;
+            min-height: 280px;
+            overflow: hidden;
+            touch-action: pan-y;
+        }
+
+        #globe {
+            display: block;
+            width: 100%;
+            height: 100%;
+            cursor: grab;
+            touch-action: none;
+        }
+
+        #globe:active { cursor: grabbing; }
+
+        .globe-hint {
+            position: absolute;
+            bottom: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: max-content;
+            max-width: 90%;
+            padding: 8px 12px;
+            border: 1px solid #ffffff15;
+            border-radius: 999px;
+            background: #071326cc;
+            color: #b8c9df;
+            font-size: 11px;
+            pointer-events: none;
+        }
+
+        .controls {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 9px;
+            margin: 10px auto 0;
+        }
+
+        .controls button {
+            min-height: 42px;
+            padding: 10px 15px;
+            border: 1px solid #ffffff20;
+            border-radius: 12px;
+            color: #eaf4ff;
+            background: #101d31;
+            font: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .controls button:hover {
+            border-color: #48a9ff9c;
+            background: #142844;
+        }
+
+        .controls .primary {
+            border-color: transparent;
+            background: linear-gradient(135deg, #248fe2, #7964e9);
+        }
+
+        .info {
+            width: min(680px, 100%);
+            margin: 26px auto 0;
+            padding: 18px;
+            border: 1px solid #ffffff13;
+            border-radius: 18px;
+            background: #0b1425b8;
+            text-align: left;
+        }
+
+        .info h2 { margin: 0 0 8px; font-size: 15px; }
+        .info p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after { scroll-behavior: auto !important; }
+        }
+    </style>
+</head>
+<body>
+    <header class="topbar">
+        <a class="brand" href="/" aria-label="Our Search homepage">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <span>Our Search</span>
+        </a>
+        <a class="back-link" href="/">← Back to home</a>
+    </header>
+
+    <main>
+        <div class="eyebrow">A NEW WAY TO EXPLORE</div>
+        <h1>Meet your <span>world.</span></h1>
+        <p class="intro">
+            Explore a globe you can turn with your hand. Spin it, zoom in,
+            and discover the world from a different perspective.
+        </p>
+
+        <section class="globe-shell" aria-label="Interactive globe">
+            <canvas id="globe" aria-label="Drag to rotate the interactive globe"></canvas>
+            <div class="globe-hint">Drag to rotate · Scroll to zoom</div>
+        </section>
+
+        <div class="controls">
+            <button class="primary" id="auto">Pause rotation</button>
+            <button id="reset">Reset view</button>
+            <button id="zoom-in">＋ Zoom in</button>
+            <button id="zoom-out">− Zoom out</button>
+        </div>
+
+        <section class="info">
+            <h2>Your world, your direction.</h2>
+            <p>
+                This is the first interactive globe experience for Our Search.
+                Drag across the globe to change its view, use the zoom controls,
+                or let it rotate on its own.
+            </p>
+        </section>
+    </main>
+
+    <script>
+    (() => {
+        const canvas = document.getElementById("globe");
+        const ctx = canvas.getContext("2d");
+        const shell = canvas.parentElement;
+        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        let width = 0, height = 0, dpr = 1;
+        let rotation = -0.55, tilt = -0.12, zoom = 1;
+        let dragging = false, lastX = 0, lastY = 0;
+        let autoRotate = !reduceMotion;
+        let previousTime = 0;
+        let animationId = 0;
+
+        const cities = [
+            { name: "Kolkata", lat: 22.57, lon: 88.36 },
+            { name: "London", lat: 51.51, lon: -0.12 },
+            { name: "New York", lat: 40.71, lon: -74.01 },
+            { name: "Tokyo", lat: 35.68, lon: 139.69 },
+            { name: "Nairobi", lat: -1.29, lon: 36.82 },
+            { name: "Sydney", lat: -33.87, lon: 151.21 }
+        ];
+
+        const stars = Array.from({ length: 180 }, (_, i) => ({
+            x: ((i * 137.508) % 997) / 997,
+            y: ((i * 73.127 + 19) % 991) / 991,
+            r: (i % 3) * 0.45 + 0.35,
+            a: 0.2 + (i % 7) / 10
+        }));
+
+        function resize() {
+            const rect = shell.getBoundingClientRect();
+            dpr = Math.min(window.devicePixelRatio || 1, 2);
+            width = Math.max(1, rect.width);
+            height = Math.max(1, rect.height);
+            canvas.width = Math.round(width * dpr);
+            canvas.height = Math.round(height * dpr);
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
+        function project(lat, lon) {
+            const a = lat * Math.PI / 180;
+            const b = lon * Math.PI / 180 + rotation;
+            const x = Math.cos(a) * Math.sin(b);
+            const y0 = Math.sin(a);
+            const z0 = Math.cos(a) * Math.cos(b);
+            const y = y0 * Math.cos(tilt) - z0 * Math.sin(tilt);
+            const z = y0 * Math.sin(tilt) + z0 * Math.cos(tilt);
+            const radius = Math.min(width * 0.34, height * 0.39) * zoom;
+            return {
+                x: width / 2 + x * radius,
+                y: height / 2 + y * radius,
+                z,
+                radius
+            };
+        }
+
+        function drawCurve(points, color, lineWidth = 0.7) {
+            ctx.beginPath();
+            let active = false;
+            for (const p of points) {
+                if (p.z > 0.005) {
+                    if (!active) {
+                        ctx.moveTo(p.x, p.y);
+                        active = true;
+                    } else {
+                        ctx.lineTo(p.x, p.y);
+                    }
+                } else {
+                    active = false;
+                }
+            }
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lineWidth;
+            ctx.stroke();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, width, height);
+
+            for (const star of stars) {
+                ctx.beginPath();
+                ctx.arc(star.x * width, star.y * height, star.r, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(177,211,255,${star.a})`;
+                ctx.fill();
+            }
+
+            const centerX = width / 2, centerY = height / 2;
+            const radius = Math.min(width * 0.34, height * 0.39) * zoom;
+            if (radius < 10) return;
+
+            ctx.save();
+            ctx.shadowColor = "#168bff";
+            ctx.shadowBlur = 35 * zoom;
+            const glow = ctx.createRadialGradient(
+                centerX - radius * 0.35, centerY - radius * 0.4, radius * 0.04,
+                centerX, centerY, radius * 1.1
+            );
+            glow.addColorStop(0, "#43c8ff");
+            glow.addColorStop(0.38, "#116ac2");
+            glow.addColorStop(0.78, "#08234d");
+            glow.addColorStop(1, "#020a1d");
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.fillStyle = glow;
+            ctx.fill();
+            ctx.restore();
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.clip();
+
+            for (let lat = -75; lat <= 75; lat += 15) {
+                const points = [];
+                for (let lon = -180; lon <= 180; lon += 3) points.push(project(lat, lon));
+                drawCurve(points, lat === 0 ? "rgba(103,221,255,.52)" : "rgba(115,197,255,.24)");
+            }
+
+            for (let lon = -180; lon < 180; lon += 15) {
+                const points = [];
+                for (let lat = -90; lat <= 90; lat += 3) points.push(project(lat, lon));
+                drawCurve(points, "rgba(115,197,255,.23)");
+            }
+
+            for (const city of cities) {
+                const p = project(city.lat, city.lon);
+                if (p.z <= 0.02) continue;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
+                ctx.fillStyle = "#a9f4ff";
+                ctx.shadowColor = "#48cfff";
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+            }
+            ctx.restore();
+
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+            ctx.strokeStyle = "rgba(111,202,255,.65)";
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            const rim = ctx.createRadialGradient(centerX, centerY, radius * 0.86, centerX, centerY, radius * 1.08);
+            rim.addColorStop(0, "rgba(45,154,255,0)");
+            rim.addColorStop(1, "rgba(66,162,255,.15)");
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius * 1.08, 0, Math.PI * 2);
+            ctx.fillStyle = rim;
+            ctx.fill();
+        }
+
+        function animate(time) {
+            if (autoRotate && !dragging && previousTime) {
+                rotation += Math.min(time - previousTime, 40) * 0.00012;
+            }
+            previousTime = time;
+            draw();
+            animationId = requestAnimationFrame(animate);
+        }
+
+        canvas.addEventListener("pointerdown", event => {
+            dragging = true;
+            lastX = event.clientX;
+            lastY = event.clientY;
+            canvas.setPointerCapture(event.pointerId);
+        });
+
+        canvas.addEventListener("pointermove", event => {
+            if (!dragging) return;
+            rotation += (event.clientX - lastX) * 0.008;
+            tilt += (event.clientY - lastY) * 0.005;
+            tilt = Math.max(-1.15, Math.min(1.15, tilt));
+            lastX = event.clientX;
+            lastY = event.clientY;
+            draw();
+        });
+
+        function stopDrag() { dragging = false; }
+        canvas.addEventListener("pointerup", stopDrag);
+        canvas.addEventListener("pointercancel", stopDrag);
+        canvas.addEventListener("lostpointercapture", stopDrag);
+
+        canvas.addEventListener("wheel", event => {
+            event.preventDefault();
+            zoom = Math.max(0.72, Math.min(1.65, zoom * (event.deltaY < 0 ? 1.08 : 0.92)));
+            draw();
+        }, { passive: false });
+
+        document.getElementById("auto").addEventListener("click", event => {
+            autoRotate = !autoRotate;
+            event.currentTarget.textContent = autoRotate ? "Pause rotation" : "Start rotation";
+        });
+
+        document.getElementById("reset").addEventListener("click", () => {
+            rotation = -0.55;
+            tilt = -0.12;
+            zoom = 1;
+            draw();
+        });
+
+        document.getElementById("zoom-in").addEventListener("click", () => {
+            zoom = Math.min(1.65, zoom * 1.12);
+            draw();
+        });
+
+        document.getElementById("zoom-out").addEventListener("click", () => {
+            zoom = Math.max(0.72, zoom / 1.12);
+            draw();
+        });
+
+        const observer = new ResizeObserver(() => { resize(); draw(); });
+        observer.observe(shell);
+        resize();
+        draw();
+        if (!animationId) animationId = requestAnimationFrame(animate);
+    })();
+    </script>
+</body>
+</html>

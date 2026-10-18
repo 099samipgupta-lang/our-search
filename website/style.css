@@ -1041,3 +1041,113 @@ body.search-page {
         border-radius: 18px;
     }
 }
+
+
+/* 3D INTERACTIVE WORLD CARD */
+.world-explore-card {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+    margin-top: 16px;
+    padding: 15px 17px;
+    text-align: left;
+    border: 1px solid rgba(72, 169, 255, 0.25);
+    border-radius: 17px;
+    color: var(--text);
+    background:
+        radial-gradient(circle at 0% 50%, rgba(72, 169, 255, 0.13), transparent 48%),
+        rgba(9, 20, 36, 0.78);
+    box-shadow: 0 12px 35px rgba(0, 0, 0, 0.18);
+    transition: border-color 180ms ease, transform 180ms ease,
+                background 180ms ease, box-shadow 180ms ease;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.world-explore-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(72, 169, 255, 0.65);
+    background:
+        radial-gradient(circle at 0% 50%, rgba(72, 169, 255, 0.2), transparent 55%),
+        rgba(12, 27, 49, 0.94);
+    box-shadow: 0 14px 40px rgba(30, 120, 255, 0.12);
+}
+
+.world-explore-card:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 4px;
+}
+
+.world-explore-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 46px;
+    width: 46px;
+    height: 46px;
+    border: 1px solid rgba(95, 186, 255, 0.25);
+    border-radius: 14px;
+    color: #8bd4ff;
+    background: linear-gradient(145deg, rgba(72, 169, 255, 0.2), rgba(139, 124, 255, 0.13));
+    font-size: 30px;
+    line-height: 1;
+}
+
+.world-explore-copy {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+.world-explore-copy strong {
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.world-explore-copy > span {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.world-explore-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    flex-shrink: 0;
+    color: #8acbff;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.world-explore-action > span {
+    font-size: 20px;
+    line-height: 1;
+}
+
+@media (max-width: 480px) {
+    .world-explore-card {
+        gap: 11px;
+        padding: 13px 12px;
+    }
+
+    .world-explore-icon {
+        flex-basis: 40px;
+        width: 40px;
+        height: 40px;
+    }
+
+    .world-explore-copy strong {
+        font-size: 13px;
+    }
+
+    .world-explore-copy > span {
+        font-size: 11px;
+    }
+
+    .world-explore-action {
+        gap: 3px;
+        font-size: 12px;
+    }
+}
