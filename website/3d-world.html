@@ -1,516 +1,514 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OUR SEARCH — 3D World</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>OUR SEARCH — San Francisco World</title>
 
-  <link
-    href="https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/Widgets/widgets.css"
-    rel="stylesheet"
-  >
-  <script src="https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/Cesium.js"></script>
-
-  <style>
-    * { box-sizing: border-box; }
-
-    html, body, #world {
-      width: 100%;
-      height: 100%;
-      margin: 0;
-      overflow: hidden;
-      background: #07111d;
-      font-family: system-ui, -apple-system, sans-serif;
-    }
-
-    #world { position: fixed; inset: 0; }
-
-    .panel {
-      position: fixed;
-      z-index: 10;
-      color: white;
-      background: rgba(8, 18, 32, .88);
-      border: 1px solid rgba(255,255,255,.15);
-      border-radius: 16px;
-      backdrop-filter: blur(14px);
-      box-shadow: 0 10px 35px #0004;
-    }
-
-    #topbar {
-      top: 14px;
-      left: 14px;
-      right: 14px;
-      min-height: 58px;
-      padding: 12px 15px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-
-    .brand {
-      font-weight: 800;
-      letter-spacing: 1.4px;
-      font-size: 14px;
-      white-space: nowrap;
-    }
-
-    .brand span { color: #62d9ff; }
-
-    #city {
-      width: min(48vw, 230px);
-      padding: 10px;
-      color: white;
-      background: #17283a;
-      border: 1px solid #40546a;
-      border-radius: 10px;
-      font-size: 13px;
-    }
-
-    #city option { background: #17283a; }
-
-    #info {
-      left: 14px;
-      top: 88px;
-      padding: 13px 15px;
-      max-width: 260px;
-      line-height: 1.45;
-      font-size: 12px;
-    }
-
-    #info strong {
-      display: block;
-      font-size: 15px;
-      margin-bottom: 4px;
-    }
-
-    #notice {
-      position: fixed;
-      z-index: 20;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      width: min(88vw, 390px);
-      padding: 20px;
-      border-radius: 16px;
-      color: white;
-      background: #101f31;
-      border: 1px solid #426078;
-      text-align: center;
-      line-height: 1.5;
-    }
-
-    #notice button {
-      margin-top: 12px;
-      padding: 10px 16px;
-      color: #06131e;
-      background: #62d9ff;
-      border: 0;
-      border-radius: 9px;
-      font-weight: 700;
-    }
-
-    #notice.hidden { display: none; }
-
-    #controls {
-      position: fixed;
-      z-index: 10;
-      left: 16px;
-      bottom: 20px;
-      display: grid;
-      grid-template-columns: repeat(3, 53px);
-      grid-template-rows: repeat(2, 53px);
-      gap: 7px;
-    }
-
-    .move {
-      border: 1px solid #ffffff35;
-      border-radius: 14px;
-      color: white;
-      background: rgba(8,18,32,.85);
-      font-size: 20px;
-      font-weight: 700;
-      touch-action: none;
-      user-select: none;
-    }
-
-    .move:active {
-      background: #1a789b;
-      transform: scale(.96);
-    }
-
-    #forward { grid-column: 2; grid-row: 1; }
-    #left { grid-column: 1; grid-row: 2; }
-    #back { grid-column: 2; grid-row: 2; }
-    #right { grid-column: 3; grid-row: 2; }
-
-    #help {
-      right: 14px;
-      bottom: 20px;
-      max-width: 190px;
-      padding: 12px 14px;
-      font-size: 11px;
-      line-height: 1.7;
-    }
-
-    #help strong {
-      display: block;
-      font-size: 12px;
-      margin-bottom: 3px;
-    }
-
-    .cesium-viewer-bottom {
-      bottom: 2px !important;
-    }
-
-    @media (max-width: 520px) {
-      #topbar { top: 8px; left: 8px; right: 8px; }
-      #info { top: 78px; left: 8px; max-width: 205px; }
-      #controls { left: 10px; bottom: 20px; }
-      #help { right: 8px; bottom: 20px; max-width: 150px; }
-      .move { width: 48px; height: 48px; }
-      #controls {
-        grid-template-columns: repeat(3, 48px);
-        grid-template-rows: repeat(2, 48px);
-      }
-    }
-  </style>
+<style>
+*{box-sizing:border-box}
+html,body,#game{margin:0;width:100%;height:100%;overflow:hidden}
+body{background:#111c2b;color:#fff;font-family:system-ui,Arial,sans-serif}
+#game{position:fixed;inset:0}
+canvas{display:block;width:100%;height:100%}
+.panel{position:fixed;z-index:5;background:#0a1424d9;
+ border:1px solid #ffffff25;backdrop-filter:blur(12px);border-radius:14px}
+#top{top:12px;left:12px;right:12px;padding:13px 15px;
+ display:flex;align-items:center;justify-content:space-between;gap:10px}
+.logo{font-size:13px;font-weight:850;letter-spacing:1.5px}
+.logo span{color:#65dcff}
+#status{font-size:11px;color:#b6d6e8;text-align:right}
+#intro{position:fixed;z-index:4;left:50%;top:48%;transform:translate(-50%,-50%);
+ text-align:center;pointer-events:none;text-shadow:0 3px 18px #000}
+#intro h1{font-size:clamp(25px,6vw,48px);margin:0;letter-spacing:2px}
+#intro p{font-size:13px;color:#d1e5ef}
+#controls{position:fixed;z-index:6;left:14px;bottom:22px;
+ display:grid;grid-template-columns:repeat(3,52px);grid-template-rows:repeat(2,52px);gap:7px}
+.move{color:white;background:#101f33d9;border:1px solid #ffffff45;
+ border-radius:14px;font-size:21px;font-weight:800;touch-action:none}
+.move:active{background:#176f91}
+#forward{grid-column:2;grid-row:1}
+#left{grid-column:1;grid-row:2}
+#back{grid-column:2;grid-row:2}
+#right{grid-column:3;grid-row:2}
+#help{position:fixed;right:12px;bottom:23px;padding:12px 14px;
+ font-size:11px;line-height:1.7;color:#dcebf4}
+#help b{display:block;color:white;font-size:12px}
+#error{display:none;position:fixed;z-index:20;top:40%;left:8%;right:8%;
+ padding:20px;text-align:center;background:#101f33;border-radius:14px}
+@media(max-width:500px){
+ #top{top:8px;left:8px;right:8px;padding:11px}
+ #controls{left:9px;bottom:17px;grid-template-columns:repeat(3,46px);
+ grid-template-rows:repeat(2,46px)}
+ .move{font-size:18px}
+ #help{right:8px;bottom:17px;font-size:10px;padding:9px}
+ #intro{top:40%}
+}
+</style>
 </head>
-
 <body>
-  <div id="world"></div>
+<div id="game"></div>
 
-  <header id="topbar" class="panel">
-    <div class="brand">OUR <span>SEARCH</span> / WORLD</div>
-    <select id="city" aria-label="Choose a city">
-      <option value="sf">San Francisco</option>
-      <option value="ny">New York</option>
-      <option value="la">Los Angeles</option>
-      <option value="kolkata">Kolkata</option>
-    </select>
-  </header>
+<header id="top" class="panel">
+  <div class="logo">OUR <span>SEARCH</span> / WORLD</div>
+  <div id="status">SAN FRANCISCO · LOADING CITY</div>
+</header>
 
-  <section id="info" class="panel">
-    <strong>3D World Explorer</strong>
-    <div id="location">Preparing your world…</div>
-    <div id="worldStatus">Loading Earth…</div>
-  </section>
+<div id="intro">
+  <h1>SAN FRANCISCO</h1>
+  <p>A city to explore.</p>
+</div>
 
-  <div id="controls" aria-label="Character movement">
-    <button class="move" id="forward" aria-label="Move forward">▲</button>
-    <button class="move" id="left" aria-label="Turn left">◀</button>
-    <button class="move" id="back" aria-label="Move backward">▼</button>
-    <button class="move" id="right" aria-label="Turn right">▶</button>
-  </div>
+<div id="controls">
+  <button class="move" id="forward" aria-label="Walk forward">▲</button>
+  <button class="move" id="left" aria-label="Turn left">◀</button>
+  <button class="move" id="back" aria-label="Walk backward">▼</button>
+  <button class="move" id="right" aria-label="Turn right">▶</button>
+</div>
 
-  <section id="help" class="panel">
-    <strong>Explore controls</strong>
-    W / S — Move forward / back<br>
-    A / D — Turn left / right<br>
-    Phone — Use arrow buttons<br>
-    Camera — Follows your character
-  </section>
+<div id="help" class="panel">
+  <b>EXPLORE</b>
+  W / S — Walk<br>
+  A / D — Turn<br>
+  Use buttons on phone
+</div>
 
-  <div id="notice">
-    <strong>Preparing OUR SEARCH World</strong>
-    <div id="noticeText">Loading the globe and world data. This may take a moment.</div>
-    <button id="noticeButton" class="hidden">Continue</button>
-  </div>
+<div id="error">The 3D scene could not load. Check your internet connection and reload.</div>
 
-  <script>
-    // Optional for the basic globe. A valid Cesium ion token enables
-    // Cesium World Terrain and real 3D OpenStreetMap building tiles.
-    const CESIUM_ION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IlR4dGRlZzNYZDRFaDRxaXYiLCJqdGkiOiI3OWVkYjBhYS0yNDUxLTQzY2YtOGUyYi1iZGVkYzRkMzM0NjgiLCJpZCI6NTI5MDQ1LCJzdWIiOiJTYW1pcCBHdXB0YSIsImlzcyI6Imh0dHBzOi8vYXBpLmNlc2l1bS5jb20iLCJhdWQiOiJTYW1pcCBHdXB0YSIsImlhdCI6MTc5MjMwNzA4Mn0.hgTDeTY91uDGI3VP7IE66v8_3VFc-oVkGT9eqhL2vVw";
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js"
+  }
+}
+</script>
 
-    // City coordinates: latitude, longitude.
-    const cities = {
-      sf:      { name: "San Francisco", lat: 37.7749, lon: -122.4194 },
-      ny:      { name: "New York",      lat: 40.7128, lon:  -74.0060 },
-      la:      { name: "Los Angeles",   lat: 34.0522, lon: -118.2437 },
-      kolkata: { name: "Kolkata",       lat: 22.5726, lon:   88.3639 }
-    };
+<script type="module">
+import * as THREE from "three";
 
-    const notice = document.getElementById("notice");
-    const noticeText = document.getElementById("noticeText");
-    const noticeButton = document.getElementById("noticeButton");
-    const locationText = document.getElementById("location");
-    const worldStatus = document.getElementById("worldStatus");
+const root = document.getElementById("game");
+const status = document.getElementById("status");
+const intro = document.getElementById("intro");
+const errorBox = document.getElementById("error");
 
-    let viewer;
-    let buildingsLoaded = false;
-    let activeCity = cities.sf;
-    let player = { lat: activeCity.lat, lon: activeCity.lon, heading: 0 };
-    let lastFrame = performance.now();
-    const keys = new Set();
-    const parts = [];
+try {
+  // SCENE: start on a city street, never in space.
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x9bbbd0);
+  scene.fog = new THREE.FogExp2(0x9bbbd0, 0.0018);
 
-    const radians = Cesium.Math.toRadians;
+  const camera = new THREE.PerspectiveCamera(
+    65, innerWidth / innerHeight, 0.1, 1200
+  );
 
-    function closeNotice() {
-      notice.classList.add("hidden");
+  const renderer = new THREE.WebGLRenderer({
+    antialias: true,
+    powerPreference: "high-performance"
+  });
+
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.12;
+  root.appendChild(renderer.domElement);
+
+  // CINEMATIC LIGHTING
+  scene.add(new THREE.HemisphereLight(0xc8e5ff, 0x343044, 2.0));
+
+  const sun = new THREE.DirectionalLight(0xffdfb0, 3.5);
+  sun.position.set(-90, 150, 70);
+  sun.castShadow = true;
+  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.camera.left = -100;
+  sun.shadow.camera.right = 100;
+  sun.shadow.camera.top = 100;
+  sun.shadow.camera.bottom = -100;
+  sun.shadow.bias = -0.0003;
+  scene.add(sun);
+
+  const fill = new THREE.DirectionalLight(0x72bfff, 1.1);
+  fill.position.set(100, 55, -100);
+  scene.add(fill);
+
+  function mat(color, roughness=0.8, metalness=0) {
+    return new THREE.MeshStandardMaterial({
+      color, roughness, metalness
+    });
+  }
+
+  const asphalt = mat(0x303944);
+  const sidewalk = mat(0x858b8d);
+  const concrete = mat(0xb7b6ad);
+  const whiteLine = mat(0xe2d9bb);
+  const red = mat(0xb83f36, 0.6);
+  const windowMats = [
+    mat(0x273d50, 0.3, 0.25),
+    mat(0x527185, 0.3, 0.3),
+    mat(0xf6c779, 0.35, 0.1),
+    mat(0x1c293b, 0.25, 0.4)
+  ];
+
+  function box(w,h,d,material,x,y,z,cast=true) {
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(w,h,d), material
+    );
+    mesh.position.set(x,y,z);
+    mesh.castShadow = cast;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+    return mesh;
+  }
+
+  function cylinder(rt,rb,h,material,x,y,z,segments=10) {
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(rt,rb,h,segments), material
+    );
+    mesh.position.set(x,y,z);
+    mesh.castShadow = true;
+    scene.add(mesh);
+    return mesh;
+  }
+
+  // CITY GROUND
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(1000,1000),
+    mat(0x727b78)
+  );
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = -0.12;
+  ground.receiveShadow = true;
+  scene.add(ground);
+
+  // Street grid, intersections and lane markings.
+  const roadWidth = 12;
+  const blockStep = 38;
+
+  for (let i=-12; i<=12; i++) {
+    const p = i * blockStep;
+
+    box(roadWidth,0.12,900,asphalt,p,0,0,false);
+    box(900,0.12,roadWidth,asphalt,0,0.005,p,false);
+
+    // Double lane markings.
+    for (const offset of [-1.2,1.2]) {
+      box(0.12,0.025,900,whiteLine,p+offset,0.07,0,false);
+      box(900,0.025,0.12,whiteLine,0,0.075,p+offset,false);
     }
 
-    noticeButton.addEventListener("click", closeNotice);
+    // Sidewalks along both sides of each street.
+    for (const side of [-1,1]) {
+      box(2,0.32,900,sidewalk,p+side*7.2,0.08,0,false);
+      box(900,0.32,2,sidewalk,0,0.08,p+side*7.2,false);
+    }
+  }
 
-    function showMessage(message) {
-      noticeText.textContent = message;
-      noticeButton.classList.remove("hidden");
-      notice.classList.remove("hidden");
+  // A subtle hill profile inspired by San Francisco's streets.
+  // Buildings remain aligned to the street grid for this prototype.
+  function hill(x,z) {
+    return Math.max(0,
+      Math.sin(x*0.008)*Math.cos(z*0.006)*5 +
+      Math.sin(z*0.014)*2
+    );
+  }
+
+  // CITY BUILDINGS: deterministic layout, not random every reload.
+  let seed = 7319;
+  function rand() {
+    seed = (seed * 16807) % 2147483647;
+    return (seed-1)/2147483646;
+  }
+
+  const facadeColors = [
+    0xb6a38e, 0x8e9eaa, 0xc5b7a0, 0x777f8b,
+    0xd2c8b7, 0x7c8e98, 0x9d8979, 0x596b7b
+  ];
+
+  function addBuilding(x,z,w,d,h,color) {
+    const baseY = hill(x,z);
+    const facade = mat(color,0.76,0.06);
+
+    box(w,h,d,facade,x,baseY+h/2,z);
+
+    // Roof edge and rooftop equipment.
+    box(w+0.25,0.35,d+0.25,mat(0x343e49),
+        x,baseY+h+0.15,z,false);
+
+    if (h>16) {
+      box(w*0.28,1.4,d*0.3,mat(0x505962),
+          x,baseY+h+0.95,z,false);
     }
 
-    function positionAt(lat, lon, height = 0) {
-      return Cesium.Cartesian3.fromDegrees(lon, lat, height);
-    }
+    // Repeated window rows on all four sides.
+    const floors = Math.min(26,Math.floor(h/2.8));
+    const columns = Math.max(2,Math.floor(w/2.5));
 
-    // Convert local character offsets (east, north, up) to Earth coordinates.
-    function localPosition(center, east, north, up) {
-      const frame = Cesium.Transforms.eastNorthUpToFixedFrame(center);
-      const offset = new Cesium.Cartesian3(east, north, up);
-      return Cesium.Matrix4.multiplyByPointAsVector(
-        frame,
-        offset,
-        new Cesium.Cartesian3()
-      );
-    }
+    for (let f=0; f<floors; f++) {
+      const wy = baseY + 1.4 + f*2.7;
 
-    function createCharacter() {
-      // A simple 3D mannequin made from ellipsoids.
-      // Later we can replace these pieces with your own 3D character model.
-      const shapeList = [
-        { name: "body", east: 0, north: 0, up: 1.12,
-          radii: new Cesium.Cartesian3(.27, .19, .43),
-          color: Cesium.Color.fromCssColorString("#25c8ff") },
+      for (let c=0; c<columns; c++) {
+        const wx = x-w/2 + (c+0.5)*w/columns;
+        const ww = Math.min(0.9,w/columns*0.48);
+        const wh = 1.05;
+        const wm = windowMats[
+          rand() < 0.10 ? 2 : Math.floor(rand()*windowMats.length)
+        ];
 
-        { name: "head", east: 0, north: 0, up: 1.78,
-          radii: new Cesium.Cartesian3(.19, .19, .20),
-          color: Cesium.Color.fromCssColorString("#f2c49b") },
+        box(ww,wh,0.045,wm,wx,wy,z+d/2+0.025,false);
+        box(ww,wh,0.045,wm,wx,wy,z-d/2-0.025,false);
+      }
 
-        { name: "left arm", east: -.34, north: 0, up: 1.20,
-          radii: new Cesium.Cartesian3(.105, .12, .34),
-          color: Cesium.Color.fromCssColorString("#148db9") },
+      const rows = Math.max(2,Math.floor(d/2.5));
+      for (let c=0; c<rows; c++) {
+        const wz = z-d/2+(c+0.5)*d/rows;
+        const ww = Math.min(0.9,d/rows*0.48);
 
-        { name: "right arm", east: .34, north: 0, up: 1.20,
-          radii: new Cesium.Cartesian3(.105, .12, .34),
-          color: Cesium.Color.fromCssColorString("#148db9") },
-
-        { name: "left leg", east: -.13, north: 0, up: .48,
-          radii: new Cesium.Cartesian3(.12, .13, .34),
-          color: Cesium.Color.fromCssColorString("#263b68") },
-
-        { name: "right leg", east: .13, north: 0, up: .48,
-          radii: new Cesium.Cartesian3(.12, .13, .34),
-          color: Cesium.Color.fromCssColorString("#263b68") }
-      ];
-
-      for (const shape of shapeList) {
-        const entity = viewer.entities.add({
-          name: shape.name,
-          position: positionAt(player.lat, player.lon, 0),
-          ellipsoid: {
-            radii: shape.radii,
-            material: shape.color,
-            outline: true,
-            outlineColor: Cesium.Color.WHITE.withAlpha(.25)
-          }
-        });
-
-        parts.push({ entity, shape });
+        box(0.045,wh=1.05,ww,windowMats[Math.floor(rand()*windowMats.length)],
+            x+w/2+0.025,wy,wz,false);
+        box(0.045,wh,ww,windowMats[Math.floor(rand()*windowMats.length)],
+            x-w/2-0.025,wy,wz,false);
       }
     }
+  }
 
-    function updateCharacter() {
-      const center = positionAt(player.lat, player.lon, 0);
+  // Blocks distributed around the player's starting street.
+  for (let gx=-7; gx<=7; gx++) {
+    for (let gz=-9; gz<=9; gz++) {
+      const bx=gx*blockStep;
+      const bz=gz*blockStep;
 
-      for (const item of parts) {
-        const s = item.shape;
-        item.entity.position = localPosition(center, s.east, s.north, s.up);
-      }
+      // Keep the starting area open so the player is immediately visible.
+      if (Math.abs(bx)<17 && Math.abs(bz)<24) continue;
 
-      locationText.textContent =
-        activeCity.name + " · " +
-        player.lat.toFixed(5) + ", " + player.lon.toFixed(5);
-    }
+      const count=2+Math.floor(rand()*3);
 
-    function followCharacter() {
-      const target = positionAt(player.lat, player.lon, 1.0);
+      for (let n=0;n<count;n++) {
+        const w=7+rand()*7;
+        const d=7+rand()*7;
+        const x=bx+(rand()-.5)*17;
+        const z=bz+(rand()-.5)*17;
+        let h=9+rand()*48;
 
-      // Place the camera behind the character and look down slightly.
-      viewer.camera.lookAt(
-        target,
-        new Cesium.HeadingPitchRange(
-          player.heading + Math.PI,
-          radians(-18),
-          18
-        )
-      );
-    }
-
-    function moveCharacter(delta) {
-      const turnSpeed = 1.7;
-      const walkSpeed = 0.000035; // Approximate latitude degrees per second.
-
-      if (keys.has("a") || keys.has("arrowleft")) {
-        player.heading -= turnSpeed * delta;
-      }
-      if (keys.has("d") || keys.has("arrowright")) {
-        player.heading += turnSpeed * delta;
-      }
-
-      let direction = 0;
-      if (keys.has("w") || keys.has("arrowup")) direction += 1;
-      if (keys.has("s") || keys.has("arrowdown")) direction -= 1;
-
-      if (direction !== 0) {
-        const distance = walkSpeed * delta * direction;
-        player.lat += Math.cos(player.heading) * distance;
-        const cosLat = Math.max(.15, Math.cos(radians(player.lat)));
-        player.lon += Math.sin(player.heading) * distance / cosLat;
-
-        // Keep longitude inside the usual range.
-        if (player.lon > 180) player.lon -= 360;
-        if (player.lon < -180) player.lon += 360;
-      }
-
-      updateCharacter();
-      followCharacter();
-    }
-
-    async function loadWorld() {
-      const hasToken =
-        CESIUM_ION_TOKEN !== "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IlR4dGRlZzNYZDRFaDRxaXYiLCJqdGkiOiI3OWVkYjBhYS0yNDUxLTQzY2YtOGUyYi1iZGVkYzRkMzM0NjgiLCJpZCI6NTI5MDQ1LCJzdWIiOiJTYW1pcCBHdXB0YSIsImlzcyI6Imh0dHBzOi8vYXBpLmNlc2l1bS5jb20iLCJhdWQiOiJTYW1pcCBHdXB0YSIsImlhdCI6MTc5MjMwNzA4Mn0.hgTDeTY91uDGI3VP7IE66v8_3VFc-oVkGT9eqhL2vVw" &&
-        CESIUM_ION_TOKEN.trim().length > 10;
-
-      if (hasToken) {
-        Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
-      }
-
-      viewer = new Cesium.Viewer("world", {
-        animation: false,
-        timeline: false,
-        baseLayerPicker: false,
-        geocoder: false,
-        homeButton: false,
-        sceneModePicker: false,
-        navigationHelpButton: false,
-        fullscreenButton: false,
-        infoBox: false,
-        selectionIndicator: false,
-        scene3DOnly: true,
-        terrain: hasToken
-          ? Cesium.Terrain.fromWorldTerrain()
-          : new Cesium.EllipsoidTerrainProvider()
-      });
-
-      viewer.scene.globe.depthTestAgainstTerrain = false;
-      viewer.scene.screenSpaceCameraController.enableTilt = false;
-      viewer.scene.screenSpaceCameraController.enableRotate = false;
-
-      if (hasToken) {
-        try {
-          const buildings = await Cesium.createOsmBuildingsAsync();
-          viewer.scene.primitives.add(buildings);
-          buildingsLoaded = true;
-          worldStatus.textContent = "Real 3D buildings enabled";
-        } catch (error) {
-          console.error("Buildings could not load:", error);
-          worldStatus.textContent = "Globe loaded; 3D buildings unavailable";
+        // A few tall downtown towers.
+        if (Math.abs(gx)<3 && Math.abs(gz)<4 && rand()>.45) {
+          h=55+rand()*85;
         }
-      } else {
-        worldStatus.textContent = "Basic globe · Add a Cesium token for 3D data";
+
+        // Lower neighbourhood buildings toward the outer districts.
+        if (Math.abs(gx)>5 || Math.abs(gz)>7) h=8+rand()*17;
+
+        const color=facadeColors[Math.floor(rand()*facadeColors.length)];
+        addBuilding(x,z,w,d,h,color);
       }
-
-      createCharacter();
-      updateCharacter();
-      followCharacter();
-
-      viewer.scene.camera.moveEnd.addEventListener(() => {
-        // The follow camera is controlled by the game loop.
-      });
-
-      notice.classList.add("hidden");
-      if (!hasToken) {
-        showMessage(
-          "The basic globe is ready. To enable real 3D terrain and buildings, " +
-          "create a Cesium ion access token, add it to this page, and reload."
-        );
-      }
-
-      requestAnimationFrame(gameLoop);
     }
+  }
 
-    function gameLoop(now) {
-      const delta = Math.min((now - lastFrame) / 1000, .05);
-      lastFrame = now;
+  // STREETLIGHTS
+  const lampMat=mat(0x303a43,0.55,0.35);
+  const bulbMat=new THREE.MeshStandardMaterial({
+    color:0xffdba0, emissive:0xffa84a, emissiveIntensity:2
+  });
 
-      if (viewer && !viewer.isDestroyed()) {
-        moveCharacter(delta);
-        viewer.scene.requestRender();
-      }
+  for (let z=-260;z<=260;z+=38) {
+    for (const x of [-9,9]) {
+      cylinder(0.12,0.16,5,lampMat,x,2.5,z);
+      box(1.4,0.12,0.12,lampMat,x+(x<0?0.6:-0.6),4.9,z,false);
 
-      requestAnimationFrame(gameLoop);
-    }
-
-    document.getElementById("city").addEventListener("change", event => {
-      activeCity = cities[event.target.value];
-      player.lat = activeCity.lat;
-      player.lon = activeCity.lon;
-      player.heading = 0;
-
-      if (viewer) {
-        updateCharacter();
-        followCharacter();
-        viewer.scene.requestRender();
-      }
-    });
-
-    // Keyboard controls.
-    window.addEventListener("keydown", event => {
-      const key = event.key.toLowerCase();
-      if (["w", "a", "s", "d", "arrowup", "arrowdown",
-           "arrowleft", "arrowright"].includes(key)) {
-        event.preventDefault();
-        keys.add(key);
-      }
-    });
-
-    window.addEventListener("keyup", event => {
-      keys.delete(event.key.toLowerCase());
-    });
-
-    window.addEventListener("blur", () => keys.clear());
-
-    // Touch and mouse controls for the on-screen buttons.
-    function bindButton(id, key) {
-      const button = document.getElementById(id);
-
-      button.addEventListener("pointerdown", event => {
-        event.preventDefault();
-        keys.add(key);
-        button.setPointerCapture?.(event.pointerId);
-      });
-
-      const release = event => {
-        event.preventDefault();
-        keys.delete(key);
-      };
-
-      button.addEventListener("pointerup", release);
-      button.addEventListener("pointercancel", release);
-      button.addEventListener("lostpointercapture", () => keys.delete(key));
-    }
-
-    bindButton("forward", "w");
-    bindButton("back", "s");
-    bindButton("left", "a");
-    bindButton("right", "d");
-
-    loadWorld().catch(error => {
-      console.error("OUR SEARCH World failed:", error);
-      showMessage(
-        "The 3D world could not finish loading. Check your internet connection " +
-        "and the browser console, then reload the page."
+      const bulb=new THREE.Mesh(
+        new THREE.SphereGeometry(0.2,8,8),bulbMat
       );
+      bulb.position.set(x+(x<0?1.2:-1.2),4.8,z);
+      scene.add(bulb);
+    }
+  }
+
+  // GOLDEN GATE BRIDGE landmark ahead in the distance.
+  // This is a recognizable geometric landmark, not a surveyed replica.
+  const bridgeZ=-285;
+  const bridgeDeck=box(220,1.2,9,red,0,16,bridgeZ);
+  const towerMat=mat(0xc44738,0.5,0.2);
+
+  for (const x of [-75,75]) {
+    box(5,60,5,towerMat,x,30,bridgeZ);
+    box(5,60,5,towerMat,x,30,bridgeZ-6);
+    box(14,3,14,towerMat,x,49,bridgeZ-3);
+
+    // Main suspension cables.
+    const curve=new THREE.CatmullRomCurve3([
+      new THREE.Vector3(-110,24,bridgeZ),
+      new THREE.Vector3(-75,58,bridgeZ),
+      new THREE.Vector3(0,29,bridgeZ),
+      new THREE.Vector3(75,58,bridgeZ),
+      new THREE.Vector3(110,24,bridgeZ)
+    ]);
+    scene.add(new THREE.Mesh(
+      new THREE.TubeGeometry(curve,100,0.45,6,false),red
+    ));
+  }
+
+  // CHARACTER — third-person prototype mannequin.
+  const player=new THREE.Group();
+  scene.add(player);
+
+  const skin=mat(0xd9a47e);
+  const jacket=mat(0x17b9d6,0.48,0.15);
+  const pants=mat(0x273b62);
+  const shoes=mat(0x1c2531);
+  const dark=mat(0x162331);
+
+  function bodyPart(geometry,material,x,y,z) {
+    const mesh=new THREE.Mesh(geometry,material);
+    mesh.position.set(x,y,z);
+    mesh.castShadow=true;
+    mesh.receiveShadow=true;
+    player.add(mesh);
+    return mesh;
+  }
+
+  bodyPart(new THREE.BoxGeometry(0.85,1.0,0.45),jacket,0,1.45,0);
+  bodyPart(new THREE.SphereGeometry(0.31,16,12),skin,0,2.25,0);
+  bodyPart(new THREE.BoxGeometry(0.88,0.18,0.5),dark,0,2.55,0);
+
+  // Arms and legs pivot for a simple walking animation.
+  function limb(x,y,length,material) {
+    const pivot=new THREE.Group();
+    pivot.position.set(x,y,0);
+    player.add(pivot);
+
+    const mesh=new THREE.Mesh(
+      new THREE.CylinderGeometry(0.13,0.12,length,10),material
+    );
+    mesh.position.y=-length/2;
+    mesh.castShadow=true;
+    pivot.add(mesh);
+    return pivot;
+  }
+
+  const leftArm=limb(-0.55,1.8,0.76,jacket);
+  const rightArm=limb(0.55,1.8,0.76,jacket);
+  const leftLeg=limb(-0.23,1.0,0.9,pants);
+  const rightLeg=limb(0.23,1.0,0.9,pants);
+
+  bodyPart(new THREE.BoxGeometry(0.3,0.14,0.48),shoes,-0.23,0.08,-0.08);
+  bodyPart(new THREE.BoxGeometry(0.3,0.14,0.48),shoes,0.23,0.08,-0.08);
+
+  // Player starts in the middle of a San Francisco-style street.
+  player.position.set(0,0,8);
+
+  // Third-person camera: always starts behind the character.
+  camera.position.set(0,4.3,15);
+  camera.lookAt(0,1.3,8);
+
+  const keys=new Set();
+  let heading=0;
+  let walkTime=0;
+  let lastTime=performance.now();
+
+  function press(key) { keys.add(key); }
+  function release(key) { keys.delete(key); }
+
+  window.addEventListener("keydown",e=>{
+    const k=e.key.toLowerCase();
+    if(["w","a","s","d","arrowup","arrowdown","arrowleft","arrowright"].includes(k)){
+      e.preventDefault();
+      press(k);
+    }
+  });
+
+  window.addEventListener("keyup",e=>release(e.key.toLowerCase()));
+  window.addEventListener("blur",()=>keys.clear());
+
+  function bindButton(id,key) {
+    const el=document.getElementById(id);
+
+    el.addEventListener("pointerdown",e=>{
+      e.preventDefault();
+      press(key);
+      el.setPointerCapture?.(e.pointerId);
     });
-  </script>
+
+    const end=e=>{e.preventDefault();release(key);};
+    el.addEventListener("pointerup",end);
+    el.addEventListener("pointercancel",end);
+    el.addEventListener("lostpointercapture",()=>release(key));
+  }
+
+  bindButton("forward","w");
+  bindButton("back","s");
+  bindButton("left","a");
+  bindButton("right","d");
+
+  function animate(now) {
+    requestAnimationFrame(animate);
+    const dt=Math.min((now-lastTime)/1000,0.04);
+    lastTime=now;
+
+    const turning=1.9*dt;
+    if(keys.has("a")||keys.has("arrowleft")) heading+=turning;
+    if(keys.has("d")||keys.has("arrowright")) heading-=turning;
+
+    let moving=0;
+    if(keys.has("w")||keys.has("arrowup")) moving+=1;
+    if(keys.has("s")||keys.has("arrowdown")) moving-=1;
+
+    if(moving!==0) {
+      const speed=9*dt*moving;
+      player.position.x+=Math.sin(heading)*speed;
+      player.position.z-=Math.cos(heading)*speed;
+
+      walkTime+=dt*11;
+      leftArm.rotation.x=Math.sin(walkTime)*0.65;
+      rightArm.rotation.x=-Math.sin(walkTime)*0.65;
+      leftLeg.rotation.x=-Math.sin(walkTime)*0.65;
+      rightLeg.rotation.x=Math.sin(walkTime)*0.65;
+    } else {
+      leftArm.rotation.x=THREE.MathUtils.damp(leftArm.rotation.x,0,8,dt);
+      rightArm.rotation.x=THREE.MathUtils.damp(rightArm.rotation.x,0,8,dt);
+      leftLeg.rotation.x=THREE.MathUtils.damp(leftLeg.rotation.x,0,8,dt);
+      rightLeg.rotation.x=THREE.MathUtils.damp(rightLeg.rotation.x,0,8,dt);
+    }
+
+    player.rotation.y=heading;
+
+    // Smooth follow camera, positioned behind and above the player.
+    const distance=9;
+    const targetCamera=new THREE.Vector3(
+      player.position.x-Math.sin(heading)*distance,
+      player.position.y+4.2,
+      player.position.z+Math.cos(heading)*distance
+    );
+
+    camera.position.lerp(targetCamera,1-Math.exp(-5*dt));
+    camera.lookAt(
+      player.position.x,
+      player.position.y+1.35,
+      player.position.z
+    );
+
+    // Gentle sunlit ambience without a space backdrop.
+    renderer.render(scene,camera);
+
+    if(now>2500) intro.style.opacity="0.2";
+  }
+
+  window.addEventListener("resize",()=>{
+    camera.aspect=innerWidth/innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth,innerHeight);
+    renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+  });
+
+  status.textContent="SAN FRANCISCO · CITY WORLD";
+  requestAnimationFrame(animate);
+
+} catch (err) {
+  console.error(err);
+  errorBox.style.display="block";
+  errorBox.textContent="3D scene failed: "+err.message;
+  document.getElementById("status").textContent="SCENE ERROR";
+}
+</script>
 </body>
 </html>
