@@ -1,445 +1,516 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="theme-color" content="#030814">
-    <title>3D Interactive World | Our Search</title>
-    <style>
-        :root {
-            color-scheme: dark;
-            --bg: #030814;
-            --muted: #9eabc0;
-            --blue: #48a9ff;
-            --purple: #8b7cff;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OUR SEARCH — 3D World</title>
 
-        * { box-sizing: border-box; }
+  <link
+    href="https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/Widgets/widgets.css"
+    rel="stylesheet"
+  >
+  <script src="https://cesium.com/downloads/cesiumjs/releases/1.146/Build/Cesium/Cesium.js"></script>
 
-        body {
-            margin: 0;
-            min-height: 100vh;
-            color: #f4f8ff;
-            background:
-                radial-gradient(ellipse at 50% 42%, rgba(0, 90, 180, .18), transparent 55%),
-                radial-gradient(ellipse at 50% 100%, rgba(83, 44, 180, .12), transparent 50%),
-                var(--bg);
-            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-        }
+  <style>
+    * { box-sizing: border-box; }
 
-        a { color: inherit; text-decoration: none; }
+    html, body, #world {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background: #07111d;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
 
-        .topbar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
-            width: min(1200px, calc(100% - 36px));
-            margin: auto;
-            padding: 22px 0;
-        }
+    #world { position: fixed; inset: 0; }
 
-        .brand {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-weight: 750;
-        }
+    .panel {
+      position: fixed;
+      z-index: 10;
+      color: white;
+      background: rgba(8, 18, 32, .88);
+      border: 1px solid rgba(255,255,255,.15);
+      border-radius: 16px;
+      backdrop-filter: blur(14px);
+      box-shadow: 0 10px 35px #0004;
+    }
 
-        .brand-mark {
-            width: 28px;
-            height: 28px;
-            border-radius: 9px;
-            background: linear-gradient(135deg, var(--blue), var(--purple));
-            box-shadow: 0 0 24px #48a9ff35;
-        }
+    #topbar {
+      top: 14px;
+      left: 14px;
+      right: 14px;
+      min-height: 58px;
+      padding: 12px 15px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
 
-        .back-link {
-            padding: 9px 13px;
-            border: 1px solid #ffffff1c;
-            border-radius: 11px;
-            color: #c4d2e6;
-            font-size: 13px;
-        }
+    .brand {
+      font-weight: 800;
+      letter-spacing: 1.4px;
+      font-size: 14px;
+      white-space: nowrap;
+    }
 
-        main {
-            width: min(1100px, calc(100% - 32px));
-            margin: 0 auto;
-            padding: 24px 0 60px;
-            text-align: center;
-        }
+    .brand span { color: #62d9ff; }
 
-        .eyebrow {
-            color: #80caff;
-            font-size: 11px;
-            font-weight: 750;
-            letter-spacing: 4px;
-        }
+    #city {
+      width: min(48vw, 230px);
+      padding: 10px;
+      color: white;
+      background: #17283a;
+      border: 1px solid #40546a;
+      border-radius: 10px;
+      font-size: 13px;
+    }
 
-        h1 {
-            margin: 13px 0 12px;
-            font-size: clamp(34px, 6vw, 62px);
-            line-height: 1.05;
-            letter-spacing: -2px;
-        }
+    #city option { background: #17283a; }
 
-        h1 span {
-            color: #88bfff;
-            background: linear-gradient(90deg, #67d5ff, #a18aff);
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
+    #info {
+      left: 14px;
+      top: 88px;
+      padding: 13px 15px;
+      max-width: 260px;
+      line-height: 1.45;
+      font-size: 12px;
+    }
 
-        .intro {
-            max-width: 590px;
-            margin: 0 auto;
-            color: var(--muted);
-            line-height: 1.7;
-            font-size: 14px;
-        }
+    #info strong {
+      display: block;
+      font-size: 15px;
+      margin-bottom: 4px;
+    }
 
-        .globe-shell {
-            position: relative;
-            width: min(680px, 100%);
-            margin: 18px auto 0;
-            aspect-ratio: 1 / 0.88;
-            min-height: 280px;
-            overflow: hidden;
-            touch-action: pan-y;
-        }
+    #notice {
+      position: fixed;
+      z-index: 20;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: min(88vw, 390px);
+      padding: 20px;
+      border-radius: 16px;
+      color: white;
+      background: #101f31;
+      border: 1px solid #426078;
+      text-align: center;
+      line-height: 1.5;
+    }
 
-        #globe {
-            display: block;
-            width: 100%;
-            height: 100%;
-            cursor: grab;
-            touch-action: none;
-        }
+    #notice button {
+      margin-top: 12px;
+      padding: 10px 16px;
+      color: #06131e;
+      background: #62d9ff;
+      border: 0;
+      border-radius: 9px;
+      font-weight: 700;
+    }
 
-        #globe:active { cursor: grabbing; }
+    #notice.hidden { display: none; }
 
-        .globe-hint {
-            position: absolute;
-            bottom: 8px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: max-content;
-            max-width: 90%;
-            padding: 8px 12px;
-            border: 1px solid #ffffff15;
-            border-radius: 999px;
-            background: #071326cc;
-            color: #b8c9df;
-            font-size: 11px;
-            pointer-events: none;
-        }
+    #controls {
+      position: fixed;
+      z-index: 10;
+      left: 16px;
+      bottom: 20px;
+      display: grid;
+      grid-template-columns: repeat(3, 53px);
+      grid-template-rows: repeat(2, 53px);
+      gap: 7px;
+    }
 
-        .controls {
-            display: flex;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 9px;
-            margin: 10px auto 0;
-        }
+    .move {
+      border: 1px solid #ffffff35;
+      border-radius: 14px;
+      color: white;
+      background: rgba(8,18,32,.85);
+      font-size: 20px;
+      font-weight: 700;
+      touch-action: none;
+      user-select: none;
+    }
 
-        .controls button {
-            min-height: 42px;
-            padding: 10px 15px;
-            border: 1px solid #ffffff20;
-            border-radius: 12px;
-            color: #eaf4ff;
-            background: #101d31;
-            font: inherit;
-            font-size: 12px;
-            cursor: pointer;
-        }
+    .move:active {
+      background: #1a789b;
+      transform: scale(.96);
+    }
 
-        .controls button:hover {
-            border-color: #48a9ff9c;
-            background: #142844;
-        }
+    #forward { grid-column: 2; grid-row: 1; }
+    #left { grid-column: 1; grid-row: 2; }
+    #back { grid-column: 2; grid-row: 2; }
+    #right { grid-column: 3; grid-row: 2; }
 
-        .controls .primary {
-            border-color: transparent;
-            background: linear-gradient(135deg, #248fe2, #7964e9);
-        }
+    #help {
+      right: 14px;
+      bottom: 20px;
+      max-width: 190px;
+      padding: 12px 14px;
+      font-size: 11px;
+      line-height: 1.7;
+    }
 
-        .info {
-            width: min(680px, 100%);
-            margin: 26px auto 0;
-            padding: 18px;
-            border: 1px solid #ffffff13;
-            border-radius: 18px;
-            background: #0b1425b8;
-            text-align: left;
-        }
+    #help strong {
+      display: block;
+      font-size: 12px;
+      margin-bottom: 3px;
+    }
 
-        .info h2 { margin: 0 0 8px; font-size: 15px; }
-        .info p { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.7; }
+    .cesium-viewer-bottom {
+      bottom: 2px !important;
+    }
 
-        @media (prefers-reduced-motion: reduce) {
-            *, *::before, *::after { scroll-behavior: auto !important; }
-        }
-    </style>
+    @media (max-width: 520px) {
+      #topbar { top: 8px; left: 8px; right: 8px; }
+      #info { top: 78px; left: 8px; max-width: 205px; }
+      #controls { left: 10px; bottom: 20px; }
+      #help { right: 8px; bottom: 20px; max-width: 150px; }
+      .move { width: 48px; height: 48px; }
+      #controls {
+        grid-template-columns: repeat(3, 48px);
+        grid-template-rows: repeat(2, 48px);
+      }
+    }
+  </style>
 </head>
+
 <body>
-    <header class="topbar">
-        <a class="brand" href="/" aria-label="Our Search homepage">
-            <span class="brand-mark" aria-hidden="true"></span>
-            <span>Our Search</span>
-        </a>
-        <a class="back-link" href="/">← Back to home</a>
-    </header>
+  <div id="world"></div>
 
-    <main>
-        <div class="eyebrow">A NEW WAY TO EXPLORE</div>
-        <h1>Meet your <span>world.</span></h1>
-        <p class="intro">
-            Explore a globe you can turn with your hand. Spin it, zoom in,
-            and discover the world from a different perspective.
-        </p>
+  <header id="topbar" class="panel">
+    <div class="brand">OUR <span>SEARCH</span> / WORLD</div>
+    <select id="city" aria-label="Choose a city">
+      <option value="sf">San Francisco</option>
+      <option value="ny">New York</option>
+      <option value="la">Los Angeles</option>
+      <option value="kolkata">Kolkata</option>
+    </select>
+  </header>
 
-        <section class="globe-shell" aria-label="Interactive globe">
-            <canvas id="globe" aria-label="Drag to rotate the interactive globe"></canvas>
-            <div class="globe-hint">Drag to rotate · Scroll to zoom</div>
-        </section>
+  <section id="info" class="panel">
+    <strong>3D World Explorer</strong>
+    <div id="location">Preparing your world…</div>
+    <div id="worldStatus">Loading Earth…</div>
+  </section>
 
-        <div class="controls">
-            <button class="primary" id="auto">Pause rotation</button>
-            <button id="reset">Reset view</button>
-            <button id="zoom-in">＋ Zoom in</button>
-            <button id="zoom-out">− Zoom out</button>
-        </div>
+  <div id="controls" aria-label="Character movement">
+    <button class="move" id="forward" aria-label="Move forward">▲</button>
+    <button class="move" id="left" aria-label="Turn left">◀</button>
+    <button class="move" id="back" aria-label="Move backward">▼</button>
+    <button class="move" id="right" aria-label="Turn right">▶</button>
+  </div>
 
-        <section class="info">
-            <h2>Your world, your direction.</h2>
-            <p>
-                This is the first interactive globe experience for Our Search.
-                Drag across the globe to change its view, use the zoom controls,
-                or let it rotate on its own.
-            </p>
-        </section>
-    </main>
+  <section id="help" class="panel">
+    <strong>Explore controls</strong>
+    W / S — Move forward / back<br>
+    A / D — Turn left / right<br>
+    Phone — Use arrow buttons<br>
+    Camera — Follows your character
+  </section>
 
-    <script>
-    (() => {
-        const canvas = document.getElementById("globe");
-        const ctx = canvas.getContext("2d");
-        const shell = canvas.parentElement;
-        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  <div id="notice">
+    <strong>Preparing OUR SEARCH World</strong>
+    <div id="noticeText">Loading the globe and world data. This may take a moment.</div>
+    <button id="noticeButton" class="hidden">Continue</button>
+  </div>
 
-        let width = 0, height = 0, dpr = 1;
-        let rotation = -0.55, tilt = -0.12, zoom = 1;
-        let dragging = false, lastX = 0, lastY = 0;
-        let autoRotate = !reduceMotion;
-        let previousTime = 0;
-        let animationId = 0;
+  <script>
+    // Optional for the basic globe. A valid Cesium ion token enables
+    // Cesium World Terrain and real 3D OpenStreetMap building tiles.
+    const CESIUM_ION_TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IlR4dGRlZzNYZDRFaDRxaXYiLCJqdGkiOiI3OWVkYjBhYS0yNDUxLTQzY2YtOGUyYi1iZGVkYzRkMzM0NjgiLCJpZCI6NTI5MDQ1LCJzdWIiOiJTYW1pcCBHdXB0YSIsImlzcyI6Imh0dHBzOi8vYXBpLmNlc2l1bS5jb20iLCJhdWQiOiJTYW1pcCBHdXB0YSIsImlhdCI6MTc5MjMwNzA4Mn0.hgTDeTY91uDGI3VP7IE66v8_3VFc-oVkGT9eqhL2vVw";
 
-        const cities = [
-            { name: "Kolkata", lat: 22.57, lon: 88.36 },
-            { name: "London", lat: 51.51, lon: -0.12 },
-            { name: "New York", lat: 40.71, lon: -74.01 },
-            { name: "Tokyo", lat: 35.68, lon: 139.69 },
-            { name: "Nairobi", lat: -1.29, lon: 36.82 },
-            { name: "Sydney", lat: -33.87, lon: 151.21 }
-        ];
+    // City coordinates: latitude, longitude.
+    const cities = {
+      sf:      { name: "San Francisco", lat: 37.7749, lon: -122.4194 },
+      ny:      { name: "New York",      lat: 40.7128, lon:  -74.0060 },
+      la:      { name: "Los Angeles",   lat: 34.0522, lon: -118.2437 },
+      kolkata: { name: "Kolkata",       lat: 22.5726, lon:   88.3639 }
+    };
 
-        const stars = Array.from({ length: 180 }, (_, i) => ({
-            x: ((i * 137.508) % 997) / 997,
-            y: ((i * 73.127 + 19) % 991) / 991,
-            r: (i % 3) * 0.45 + 0.35,
-            a: 0.2 + (i % 7) / 10
-        }));
+    const notice = document.getElementById("notice");
+    const noticeText = document.getElementById("noticeText");
+    const noticeButton = document.getElementById("noticeButton");
+    const locationText = document.getElementById("location");
+    const worldStatus = document.getElementById("worldStatus");
 
-        function resize() {
-            const rect = shell.getBoundingClientRect();
-            dpr = Math.min(window.devicePixelRatio || 1, 2);
-            width = Math.max(1, rect.width);
-            height = Math.max(1, rect.height);
-            canvas.width = Math.round(width * dpr);
-            canvas.height = Math.round(height * dpr);
-            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    let viewer;
+    let buildingsLoaded = false;
+    let activeCity = cities.sf;
+    let player = { lat: activeCity.lat, lon: activeCity.lon, heading: 0 };
+    let lastFrame = performance.now();
+    const keys = new Set();
+    const parts = [];
+
+    const radians = Cesium.Math.toRadians;
+
+    function closeNotice() {
+      notice.classList.add("hidden");
+    }
+
+    noticeButton.addEventListener("click", closeNotice);
+
+    function showMessage(message) {
+      noticeText.textContent = message;
+      noticeButton.classList.remove("hidden");
+      notice.classList.remove("hidden");
+    }
+
+    function positionAt(lat, lon, height = 0) {
+      return Cesium.Cartesian3.fromDegrees(lon, lat, height);
+    }
+
+    // Convert local character offsets (east, north, up) to Earth coordinates.
+    function localPosition(center, east, north, up) {
+      const frame = Cesium.Transforms.eastNorthUpToFixedFrame(center);
+      const offset = new Cesium.Cartesian3(east, north, up);
+      return Cesium.Matrix4.multiplyByPointAsVector(
+        frame,
+        offset,
+        new Cesium.Cartesian3()
+      );
+    }
+
+    function createCharacter() {
+      // A simple 3D mannequin made from ellipsoids.
+      // Later we can replace these pieces with your own 3D character model.
+      const shapeList = [
+        { name: "body", east: 0, north: 0, up: 1.12,
+          radii: new Cesium.Cartesian3(.27, .19, .43),
+          color: Cesium.Color.fromCssColorString("#25c8ff") },
+
+        { name: "head", east: 0, north: 0, up: 1.78,
+          radii: new Cesium.Cartesian3(.19, .19, .20),
+          color: Cesium.Color.fromCssColorString("#f2c49b") },
+
+        { name: "left arm", east: -.34, north: 0, up: 1.20,
+          radii: new Cesium.Cartesian3(.105, .12, .34),
+          color: Cesium.Color.fromCssColorString("#148db9") },
+
+        { name: "right arm", east: .34, north: 0, up: 1.20,
+          radii: new Cesium.Cartesian3(.105, .12, .34),
+          color: Cesium.Color.fromCssColorString("#148db9") },
+
+        { name: "left leg", east: -.13, north: 0, up: .48,
+          radii: new Cesium.Cartesian3(.12, .13, .34),
+          color: Cesium.Color.fromCssColorString("#263b68") },
+
+        { name: "right leg", east: .13, north: 0, up: .48,
+          radii: new Cesium.Cartesian3(.12, .13, .34),
+          color: Cesium.Color.fromCssColorString("#263b68") }
+      ];
+
+      for (const shape of shapeList) {
+        const entity = viewer.entities.add({
+          name: shape.name,
+          position: positionAt(player.lat, player.lon, 0),
+          ellipsoid: {
+            radii: shape.radii,
+            material: shape.color,
+            outline: true,
+            outlineColor: Cesium.Color.WHITE.withAlpha(.25)
+          }
+        });
+
+        parts.push({ entity, shape });
+      }
+    }
+
+    function updateCharacter() {
+      const center = positionAt(player.lat, player.lon, 0);
+
+      for (const item of parts) {
+        const s = item.shape;
+        item.entity.position = localPosition(center, s.east, s.north, s.up);
+      }
+
+      locationText.textContent =
+        activeCity.name + " · " +
+        player.lat.toFixed(5) + ", " + player.lon.toFixed(5);
+    }
+
+    function followCharacter() {
+      const target = positionAt(player.lat, player.lon, 1.0);
+
+      // Place the camera behind the character and look down slightly.
+      viewer.camera.lookAt(
+        target,
+        new Cesium.HeadingPitchRange(
+          player.heading + Math.PI,
+          radians(-18),
+          18
+        )
+      );
+    }
+
+    function moveCharacter(delta) {
+      const turnSpeed = 1.7;
+      const walkSpeed = 0.000035; // Approximate latitude degrees per second.
+
+      if (keys.has("a") || keys.has("arrowleft")) {
+        player.heading -= turnSpeed * delta;
+      }
+      if (keys.has("d") || keys.has("arrowright")) {
+        player.heading += turnSpeed * delta;
+      }
+
+      let direction = 0;
+      if (keys.has("w") || keys.has("arrowup")) direction += 1;
+      if (keys.has("s") || keys.has("arrowdown")) direction -= 1;
+
+      if (direction !== 0) {
+        const distance = walkSpeed * delta * direction;
+        player.lat += Math.cos(player.heading) * distance;
+        const cosLat = Math.max(.15, Math.cos(radians(player.lat)));
+        player.lon += Math.sin(player.heading) * distance / cosLat;
+
+        // Keep longitude inside the usual range.
+        if (player.lon > 180) player.lon -= 360;
+        if (player.lon < -180) player.lon += 360;
+      }
+
+      updateCharacter();
+      followCharacter();
+    }
+
+    async function loadWorld() {
+      const hasToken =
+        CESIUM_ION_TOKEN !== "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6IlR4dGRlZzNYZDRFaDRxaXYiLCJqdGkiOiI3OWVkYjBhYS0yNDUxLTQzY2YtOGUyYi1iZGVkYzRkMzM0NjgiLCJpZCI6NTI5MDQ1LCJzdWIiOiJTYW1pcCBHdXB0YSIsImlzcyI6Imh0dHBzOi8vYXBpLmNlc2l1bS5jb20iLCJhdWQiOiJTYW1pcCBHdXB0YSIsImlhdCI6MTc5MjMwNzA4Mn0.hgTDeTY91uDGI3VP7IE66v8_3VFc-oVkGT9eqhL2vVw" &&
+        CESIUM_ION_TOKEN.trim().length > 10;
+
+      if (hasToken) {
+        Cesium.Ion.defaultAccessToken = CESIUM_ION_TOKEN;
+      }
+
+      viewer = new Cesium.Viewer("world", {
+        animation: false,
+        timeline: false,
+        baseLayerPicker: false,
+        geocoder: false,
+        homeButton: false,
+        sceneModePicker: false,
+        navigationHelpButton: false,
+        fullscreenButton: false,
+        infoBox: false,
+        selectionIndicator: false,
+        scene3DOnly: true,
+        terrain: hasToken
+          ? Cesium.Terrain.fromWorldTerrain()
+          : new Cesium.EllipsoidTerrainProvider()
+      });
+
+      viewer.scene.globe.depthTestAgainstTerrain = false;
+      viewer.scene.screenSpaceCameraController.enableTilt = false;
+      viewer.scene.screenSpaceCameraController.enableRotate = false;
+
+      if (hasToken) {
+        try {
+          const buildings = await Cesium.createOsmBuildingsAsync();
+          viewer.scene.primitives.add(buildings);
+          buildingsLoaded = true;
+          worldStatus.textContent = "Real 3D buildings enabled";
+        } catch (error) {
+          console.error("Buildings could not load:", error);
+          worldStatus.textContent = "Globe loaded; 3D buildings unavailable";
         }
+      } else {
+        worldStatus.textContent = "Basic globe · Add a Cesium token for 3D data";
+      }
 
-        function project(lat, lon) {
-            const a = lat * Math.PI / 180;
-            const b = lon * Math.PI / 180 + rotation;
-            const x = Math.cos(a) * Math.sin(b);
-            const y0 = Math.sin(a);
-            const z0 = Math.cos(a) * Math.cos(b);
-            const y = y0 * Math.cos(tilt) - z0 * Math.sin(tilt);
-            const z = y0 * Math.sin(tilt) + z0 * Math.cos(tilt);
-            const radius = Math.min(width * 0.34, height * 0.39) * zoom;
-            return {
-                x: width / 2 + x * radius,
-                y: height / 2 + y * radius,
-                z,
-                radius
-            };
-        }
+      createCharacter();
+      updateCharacter();
+      followCharacter();
 
-        function drawCurve(points, color, lineWidth = 0.7) {
-            ctx.beginPath();
-            let active = false;
-            for (const p of points) {
-                if (p.z > 0.005) {
-                    if (!active) {
-                        ctx.moveTo(p.x, p.y);
-                        active = true;
-                    } else {
-                        ctx.lineTo(p.x, p.y);
-                    }
-                } else {
-                    active = false;
-                }
-            }
-            ctx.strokeStyle = color;
-            ctx.lineWidth = lineWidth;
-            ctx.stroke();
-        }
+      viewer.scene.camera.moveEnd.addEventListener(() => {
+        // The follow camera is controlled by the game loop.
+      });
 
-        function draw() {
-            ctx.clearRect(0, 0, width, height);
+      notice.classList.add("hidden");
+      if (!hasToken) {
+        showMessage(
+          "The basic globe is ready. To enable real 3D terrain and buildings, " +
+          "create a Cesium ion access token, add it to this page, and reload."
+        );
+      }
 
-            for (const star of stars) {
-                ctx.beginPath();
-                ctx.arc(star.x * width, star.y * height, star.r, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(177,211,255,${star.a})`;
-                ctx.fill();
-            }
+      requestAnimationFrame(gameLoop);
+    }
 
-            const centerX = width / 2, centerY = height / 2;
-            const radius = Math.min(width * 0.34, height * 0.39) * zoom;
-            if (radius < 10) return;
+    function gameLoop(now) {
+      const delta = Math.min((now - lastFrame) / 1000, .05);
+      lastFrame = now;
 
-            ctx.save();
-            ctx.shadowColor = "#168bff";
-            ctx.shadowBlur = 35 * zoom;
-            const glow = ctx.createRadialGradient(
-                centerX - radius * 0.35, centerY - radius * 0.4, radius * 0.04,
-                centerX, centerY, radius * 1.1
-            );
-            glow.addColorStop(0, "#43c8ff");
-            glow.addColorStop(0.38, "#116ac2");
-            glow.addColorStop(0.78, "#08234d");
-            glow.addColorStop(1, "#020a1d");
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-            ctx.fillStyle = glow;
-            ctx.fill();
-            ctx.restore();
+      if (viewer && !viewer.isDestroyed()) {
+        moveCharacter(delta);
+        viewer.scene.requestRender();
+      }
 
-            ctx.save();
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-            ctx.clip();
+      requestAnimationFrame(gameLoop);
+    }
 
-            for (let lat = -75; lat <= 75; lat += 15) {
-                const points = [];
-                for (let lon = -180; lon <= 180; lon += 3) points.push(project(lat, lon));
-                drawCurve(points, lat === 0 ? "rgba(103,221,255,.52)" : "rgba(115,197,255,.24)");
-            }
+    document.getElementById("city").addEventListener("change", event => {
+      activeCity = cities[event.target.value];
+      player.lat = activeCity.lat;
+      player.lon = activeCity.lon;
+      player.heading = 0;
 
-            for (let lon = -180; lon < 180; lon += 15) {
-                const points = [];
-                for (let lat = -90; lat <= 90; lat += 3) points.push(project(lat, lon));
-                drawCurve(points, "rgba(115,197,255,.23)");
-            }
+      if (viewer) {
+        updateCharacter();
+        followCharacter();
+        viewer.scene.requestRender();
+      }
+    });
 
-            for (const city of cities) {
-                const p = project(city.lat, city.lon);
-                if (p.z <= 0.02) continue;
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 2.6, 0, Math.PI * 2);
-                ctx.fillStyle = "#a9f4ff";
-                ctx.shadowColor = "#48cfff";
-                ctx.shadowBlur = 10;
-                ctx.fill();
-                ctx.shadowBlur = 0;
-            }
-            ctx.restore();
+    // Keyboard controls.
+    window.addEventListener("keydown", event => {
+      const key = event.key.toLowerCase();
+      if (["w", "a", "s", "d", "arrowup", "arrowdown",
+           "arrowleft", "arrowright"].includes(key)) {
+        event.preventDefault();
+        keys.add(key);
+      }
+    });
 
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
-            ctx.strokeStyle = "rgba(111,202,255,.65)";
-            ctx.lineWidth = 1;
-            ctx.stroke();
+    window.addEventListener("keyup", event => {
+      keys.delete(event.key.toLowerCase());
+    });
 
-            const rim = ctx.createRadialGradient(centerX, centerY, radius * 0.86, centerX, centerY, radius * 1.08);
-            rim.addColorStop(0, "rgba(45,154,255,0)");
-            rim.addColorStop(1, "rgba(66,162,255,.15)");
-            ctx.beginPath();
-            ctx.arc(centerX, centerY, radius * 1.08, 0, Math.PI * 2);
-            ctx.fillStyle = rim;
-            ctx.fill();
-        }
+    window.addEventListener("blur", () => keys.clear());
 
-        function animate(time) {
-            if (autoRotate && !dragging && previousTime) {
-                rotation += Math.min(time - previousTime, 40) * 0.00012;
-            }
-            previousTime = time;
-            draw();
-            animationId = requestAnimationFrame(animate);
-        }
+    // Touch and mouse controls for the on-screen buttons.
+    function bindButton(id, key) {
+      const button = document.getElementById(id);
 
-        canvas.addEventListener("pointerdown", event => {
-            dragging = true;
-            lastX = event.clientX;
-            lastY = event.clientY;
-            canvas.setPointerCapture(event.pointerId);
-        });
+      button.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        keys.add(key);
+        button.setPointerCapture?.(event.pointerId);
+      });
 
-        canvas.addEventListener("pointermove", event => {
-            if (!dragging) return;
-            rotation += (event.clientX - lastX) * 0.008;
-            tilt += (event.clientY - lastY) * 0.005;
-            tilt = Math.max(-1.15, Math.min(1.15, tilt));
-            lastX = event.clientX;
-            lastY = event.clientY;
-            draw();
-        });
+      const release = event => {
+        event.preventDefault();
+        keys.delete(key);
+      };
 
-        function stopDrag() { dragging = false; }
-        canvas.addEventListener("pointerup", stopDrag);
-        canvas.addEventListener("pointercancel", stopDrag);
-        canvas.addEventListener("lostpointercapture", stopDrag);
+      button.addEventListener("pointerup", release);
+      button.addEventListener("pointercancel", release);
+      button.addEventListener("lostpointercapture", () => keys.delete(key));
+    }
 
-        canvas.addEventListener("wheel", event => {
-            event.preventDefault();
-            zoom = Math.max(0.72, Math.min(1.65, zoom * (event.deltaY < 0 ? 1.08 : 0.92)));
-            draw();
-        }, { passive: false });
+    bindButton("forward", "w");
+    bindButton("back", "s");
+    bindButton("left", "a");
+    bindButton("right", "d");
 
-        document.getElementById("auto").addEventListener("click", event => {
-            autoRotate = !autoRotate;
-            event.currentTarget.textContent = autoRotate ? "Pause rotation" : "Start rotation";
-        });
-
-        document.getElementById("reset").addEventListener("click", () => {
-            rotation = -0.55;
-            tilt = -0.12;
-            zoom = 1;
-            draw();
-        });
-
-        document.getElementById("zoom-in").addEventListener("click", () => {
-            zoom = Math.min(1.65, zoom * 1.12);
-            draw();
-        });
-
-        document.getElementById("zoom-out").addEventListener("click", () => {
-            zoom = Math.max(0.72, zoom / 1.12);
-            draw();
-        });
-
-        const observer = new ResizeObserver(() => { resize(); draw(); });
-        observer.observe(shell);
-        resize();
-        draw();
-        if (!animationId) animationId = requestAnimationFrame(animate);
-    })();
-    </script>
+    loadWorld().catch(error => {
+      console.error("OUR SEARCH World failed:", error);
+      showMessage(
+        "The 3D world could not finish loading. Check your internet connection " +
+        "and the browser console, then reload the page."
+      );
+    });
+  </script>
 </body>
 </html>
