@@ -264,6 +264,7 @@ try {
       for (let c=0; c<rows; c++) {
         const wz = z-d/2+(c+0.5)*d/rows;
         const ww = Math.min(0.9,d/rows*0.48);
+        const wh = 1.05;
 
         box(0.045,1.05,ww,windowMats[Math.floor(rand()*windowMats.length)],
             x+w/2+0.025,wy,wz,false);
