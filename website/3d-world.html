@@ -121,7 +121,7 @@ try {
   const sun = new THREE.DirectionalLight(0xffdfb0, 3.5);
   sun.position.set(-90, 150, 70);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(1024, 1024);
+  sun.shadow.mapSize.set(512, 512);
   sun.shadow.camera.left = -100;
   sun.shadow.camera.right = 100;
   sun.shadow.camera.top = 100;
@@ -157,7 +157,7 @@ try {
     );
     mesh.position.set(x,y,z);
     mesh.castShadow = cast;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = false;
     scene.add(mesh);
     return mesh;
   }
@@ -242,8 +242,8 @@ try {
     }
 
     // Repeated window rows on all four sides.
-    const floors = Math.min(26,Math.floor(h/2.8));
-    const columns = Math.max(2,Math.floor(w/2.5));
+    const floors = Math.min(6,Math.floor(h/2.8));
+    const columns = Math.min(3,Math.max(2,Math.floor(w/2.5)));
 
     for (let f=0; f<floors; f++) {
       const wy = baseY + 1.4 + f*2.7;
@@ -260,7 +260,7 @@ try {
         box(ww,wh,0.045,wm,wx,wy,z-d/2-0.025,false);
       }
 
-      const rows = Math.max(2,Math.floor(d/2.5));
+      const rows = Math.min(3,Math.max(2,Math.floor(d/2.5)));
       for (let c=0; c<rows; c++) {
         const wz = z-d/2+(c+0.5)*d/rows;
         const ww = Math.min(0.9,d/rows*0.48);
