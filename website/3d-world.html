@@ -94,8 +94,8 @@ const errorBox = document.getElementById("error");
 try {
   // SCENE: start on a city street, never in space.
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x9bbbd0);
-  scene.fog = new THREE.FogExp2(0x9bbbd0, 0.0018);
+  scene.background = new THREE.Color(0xb9cbd5);
+  scene.fog = new THREE.FogExp2(0xb9cbd5, 0.00135);
 
   const camera = new THREE.PerspectiveCamera(
     65, innerWidth / innerHeight, 0.1, 1200
@@ -112,13 +112,13 @@ try {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.12;
+  renderer.toneMappingExposure = 1.18;
   root.appendChild(renderer.domElement);
 
   // CINEMATIC LIGHTING
-  scene.add(new THREE.HemisphereLight(0xc8e5ff, 0x343044, 2.0));
+  scene.add(new THREE.HemisphereLight(0xd9eaff, 0x655044, 1.7));
 
-  const sun = new THREE.DirectionalLight(0xffdfb0, 3.5);
+  const sun = new THREE.DirectionalLight(0xffd09a, 3.0);
   sun.position.set(-90, 150, 70);
   sun.castShadow = false;
   sun.shadow.mapSize.set(512, 512);
@@ -129,7 +129,7 @@ try {
   sun.shadow.bias = -0.0003;
   scene.add(sun);
 
-  const fill = new THREE.DirectionalLight(0x72bfff, 1.1);
+  const fill = new THREE.DirectionalLight(0x91bfe8, 0.7);
   fill.position.set(100, 55, -100);
   scene.add(fill);
 
@@ -226,50 +226,80 @@ try {
     0xd2c8b7, 0x7c8e98, 0x9d8979, 0x596b7b
   ];
 
+  // Shared materials keep the city rendering more efficiently.
+  const facadeMaterials = new Map(
+    facadeColors.map(color => [color, mat(color, 0.76, 0.04)])
+  );
+  const roofMaterial = mat(0x343e49, 0.88);
+  const rooftopMaterial = mat(0x505962, 0.82);
+
+  // Store window transforms and draw each material as one instanced mesh.
+  const windowInstances = windowMats.map(() => []);
+  const windowDummy = new THREE.Object3D();
+  const windowGeometry = new THREE.BoxGeometry(1, 1, 1);
+
+  function addWindowInstance(x, y, z, width, height, depth,
+                              materialIndex, rotationY = 0) {
+    windowDummy.position.set(x, y, z);
+    windowDummy.rotation.set(0, rotationY, 0);
+    windowDummy.scale.set(width, height, depth);
+    windowDummy.updateMatrix();
+    windowInstances[materialIndex].push(windowDummy.matrix.clone());
+  }
+
   function addBuilding(x,z,w,d,h,color) {
     const baseY = hill(x,z);
-    const facade = mat(color,0.76,0.06);
+    const facade = facadeMaterials.get(color) || mat(color,0.76,0.06);
 
     box(w,h,d,facade,x,baseY+h/2,z);
 
     // Roof edge and rooftop equipment.
-    box(w+0.25,0.35,d+0.25,mat(0x343e49),
+    box(w+0.25,0.35,d+0.25,roofMaterial,
         x,baseY+h+0.15,z,false);
 
     if (h>16) {
-      box(w*0.28,1.4,d*0.3,mat(0x505962),
+      box(w*0.28,1.4,d*0.3,rooftopMaterial,
           x,baseY+h+0.95,z,false);
     }
 
-    // Repeated window rows on all four sides.
-    const floors = 0;
-    const columns = Math.min(3,Math.max(2,Math.floor(w/2.5)));
+    // Detailed windows, batched later into instanced meshes.
+    const floors = Math.min(7, Math.max(2, Math.floor(h / 3.2)));
+    const columns = Math.min(4, Math.max(2, Math.floor(w / 2.5)));
+    const rows = Math.min(4, Math.max(2, Math.floor(d / 2.5)));
 
-    for (let f=0; f<floors; f++) {
-      const wy = baseY + 1.4 + f*2.7;
+    for (let f = 0; f < floors; f++) {
+      const wy = baseY + 1.4 + f * 3.2;
 
-      for (let c=0; c<columns; c++) {
-        const wx = x-w/2 + (c+0.5)*w/columns;
-        const ww = Math.min(0.9,w/columns*0.48);
-        const wh = 1.05;
-        const wm = windowMats[
-          rand() < 0.10 ? 2 : Math.floor(rand()*windowMats.length)
-        ];
+      for (let c = 0; c < columns; c++) {
+        const wx = x - w / 2 + (c + 0.5) * w / columns;
+        const ww = Math.min(0.9, w / columns * 0.48);
 
-        box(ww,wh,0.045,wm,wx,wy,z+d/2+0.025,false);
-        box(ww,wh,0.045,wm,wx,wy,z-d/2-0.025,false);
+        const frontMat = rand() < 0.10
+          ? 2 : Math.floor(rand() * windowMats.length);
+        const backMat = Math.floor(rand() * windowMats.length);
+
+        addWindowInstance(
+          wx, wy, z + d / 2 + 0.025, ww, 1.05, 0.045, frontMat
+        );
+        addWindowInstance(
+          wx, wy, z - d / 2 - 0.025, ww, 1.05, 0.045, backMat
+        );
       }
 
-      const rows = Math.min(3,Math.max(2,Math.floor(d/2.5)));
-      for (let c=0; c<rows; c++) {
-        const wz = z-d/2+(c+0.5)*d/rows;
-        const ww = Math.min(0.9,d/rows*0.48);
-        const wh = 1.05;
+      for (let c = 0; c < rows; c++) {
+        const wz = z - d / 2 + (c + 0.5) * d / rows;
+        const ww = Math.min(0.9, d / rows * 0.48);
+        const rightMat = Math.floor(rand() * windowMats.length);
+        const leftMat = Math.floor(rand() * windowMats.length);
 
-        box(0.045,1.05,ww,windowMats[Math.floor(rand()*windowMats.length)],
-            x+w/2+0.025,wy,wz,false);
-        box(0.045,wh,ww,windowMats[Math.floor(rand()*windowMats.length)],
-            x-w/2-0.025,wy,wz,false);
+        addWindowInstance(
+          x + w / 2 + 0.025, wy, wz, 0.045, 1.05, ww,
+          rightMat, Math.PI / 2
+        );
+        addWindowInstance(
+          x - w / 2 - 0.025, wy, wz, 0.045, 1.05, ww,
+          leftMat, Math.PI / 2
+        );
       }
     }
   }
@@ -304,6 +334,26 @@ try {
         addBuilding(x,z,w,d,h,color);
       }
     }
+  }
+
+
+  // Render all windows in a small number of GPU draw batches.
+  for (let i = 0; i < windowInstances.length; i++) {
+    const matrices = windowInstances[i];
+    if (matrices.length === 0) continue;
+
+    const batch = new THREE.InstancedMesh(
+      windowGeometry, windowMats[i], matrices.length
+    );
+
+    for (let j = 0; j < matrices.length; j++) {
+      batch.setMatrixAt(j, matrices[j]);
+    }
+
+    batch.instanceMatrix.needsUpdate = true;
+    batch.castShadow = false;
+    batch.receiveShadow = false;
+    scene.add(batch);
   }
 
   // STREETLIGHTS
@@ -349,54 +399,106 @@ try {
     ));
   }
 
-  // CHARACTER — third-person prototype mannequin.
-  const player=new THREE.Group();
+  // CHARACTER — detailed adult male, third-person explorer.
+  const player = new THREE.Group();
   scene.add(player);
 
-  const skin=mat(0xd9a47e);
-  const jacket=mat(0x17b9d6,0.48,0.15);
-  const pants=mat(0x273b62);
-  const shoes=mat(0x1c2531);
-  const dark=mat(0x162331);
+  const skin = mat(0xc89170, 0.78);
+  const skinLight = mat(0xd4a17f, 0.76);
+  const jacket = mat(0x344b50, 0.68);
+  const shirt = mat(0xd5d0c4, 0.82);
+  const pants = mat(0x29364b, 0.8);
+  const shoes = mat(0x171d25, 0.62);
+  const hair = mat(0x30231d, 0.92);
+  const eyes = mat(0x211b18, 0.7);
 
-  function bodyPart(geometry,material,x,y,z) {
-    const mesh=new THREE.Mesh(geometry,material);
-    mesh.position.set(x,y,z);
-    mesh.castShadow=true;
-    mesh.receiveShadow=true;
+  function bodyPart(geometry, material, x, y, z) {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
     player.add(mesh);
     return mesh;
   }
 
-  bodyPart(new THREE.BoxGeometry(0.85,1.0,0.45),jacket,0,1.45,0);
-  bodyPart(new THREE.SphereGeometry(0.31,16,12),skin,0,2.25,0);
-  bodyPart(new THREE.BoxGeometry(0.88,0.18,0.5),dark,0,2.55,0);
+  function ellipsoid(material, x, y, z, sx, sy, sz) {
+    const mesh = bodyPart(
+      new THREE.SphereGeometry(1, 12, 10),
+      material, x, y, z
+    );
+    mesh.scale.set(sx, sy, sz);
+    return mesh;
+  }
 
-  // Arms and legs pivot for a simple walking animation.
-  function limb(x,y,length,material) {
-    const pivot=new THREE.Group();
-    pivot.position.set(x,y,0);
+  // Broad upper body, defined chest, torso and waist.
+  ellipsoid(jacket, 0, 1.53, 0, 0.46, 0.58, 0.29);
+  ellipsoid(jacket, 0, 1.82, 0, 0.57, 0.30, 0.31);
+  ellipsoid(jacket, 0, 1.28, 0, 0.37, 0.34, 0.245);
+  ellipsoid(shirt, 0, 1.94, -0.015, 0.17, 0.20, 0.285);
+  ellipsoid(pants, 0, 0.98, 0, 0.35, 0.29, 0.25);
+
+  // Shoulder definition.
+  ellipsoid(jacket, -0.48, 1.81, 0, 0.23, 0.23, 0.23);
+  ellipsoid(jacket,  0.48, 1.81, 0, 0.23, 0.23, 0.23);
+
+  // Neck and sculpted head with a more defined jaw.
+  bodyPart(
+    new THREE.CylinderGeometry(0.135, 0.15, 0.25, 12),
+    skin, 0, 2.08, 0
+  );
+
+  ellipsoid(skin, 0, 2.34, 0, 0.275, 0.34, 0.25);
+  ellipsoid(skinLight, 0, 2.20, -0.045, 0.225, 0.19, 0.225);
+
+  // Hair, ears, nose and simple facial features.
+  ellipsoid(hair, 0, 2.56, 0.025, 0.285, 0.15, 0.265);
+  ellipsoid(hair, 0, 2.49, -0.205, 0.23, 0.085, 0.075);
+
+  ellipsoid(skin, -0.275, 2.33, 0, 0.055, 0.085, 0.045);
+  ellipsoid(skin,  0.275, 2.33, 0, 0.055, 0.085, 0.045);
+  ellipsoid(skinLight, 0, 2.31, -0.265, 0.045, 0.065, 0.05);
+
+  ellipsoid(eyes, -0.095, 2.375, -0.229, 0.032, 0.025, 0.018);
+  ellipsoid(eyes,  0.095, 2.375, -0.229, 0.032, 0.025, 0.018);
+  ellipsoid(hair, -0.095, 2.416, -0.225, 0.045, 0.012, 0.018);
+  ellipsoid(hair,  0.095, 2.416, -0.225, 0.045, 0.012, 0.018);
+
+  // Tapered limbs attached to animated pivots.
+  function limb(x, y, length, material, topRadius, bottomRadius) {
+    const pivot = new THREE.Group();
+    pivot.position.set(x, y, 0);
     player.add(pivot);
 
-    const mesh=new THREE.Mesh(
-      new THREE.CylinderGeometry(0.13,0.12,length,10),material
+    const mesh = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        topRadius, bottomRadius, length, 10
+      ),
+      material
     );
-    mesh.position.y=-length/2;
-    mesh.castShadow=true;
+    mesh.position.y = -length / 2;
+    mesh.castShadow = false;
     pivot.add(mesh);
+
     return pivot;
   }
 
-  const leftArm=limb(-0.55,1.8,0.76,jacket);
-  const rightArm=limb(0.55,1.8,0.76,jacket);
-  const leftLeg=limb(-0.23,1.0,0.9,pants);
-  const rightLeg=limb(0.23,1.0,0.9,pants);
+  const leftArm = limb(-0.57, 1.82, 0.86, jacket, 0.17, 0.12);
+  const rightArm = limb(0.57, 1.82, 0.86, jacket, 0.17, 0.12);
+  const leftLeg = limb(-0.23, 0.96, 0.96, pants, 0.17, 0.12);
+  const rightLeg = limb(0.23, 0.96, 0.96, pants, 0.17, 0.12);
 
-  bodyPart(new THREE.BoxGeometry(0.3,0.14,0.48),shoes,-0.23,0.08,-0.08);
-  bodyPart(new THREE.BoxGeometry(0.3,0.14,0.48),shoes,0.23,0.08,-0.08);
+  // Shoes sit at ground level, facing the direction of travel.
+  bodyPart(
+    new THREE.BoxGeometry(0.32, 0.15, 0.50),
+    shoes, -0.23, 0.08, -0.10
+  );
+  bodyPart(
+    new THREE.BoxGeometry(0.32, 0.15, 0.50),
+    shoes, 0.23, 0.08, -0.10
+  );
 
-  // Player starts in the middle of a San Francisco-style street.
-  player.position.set(0,0,8);
+  // Player starts in the middle of the street.
+  player.position.set(0, 0, 8);
 
   // Third-person camera: always starts behind the character.
   camera.position.set(0,4.3,15);
