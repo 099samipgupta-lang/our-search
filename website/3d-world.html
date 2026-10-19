@@ -85,6 +85,7 @@ canvas{display:block;width:100%;height:100%}
 
 <script type="module">
 import * as THREE from "three";
+import { AssetLoader } from "./game/asset-loader.js";
 
 const root = document.getElementById("game");
 const status = document.getElementById("status");
@@ -94,6 +95,8 @@ const errorBox = document.getElementById("error");
 try {
   // SCENE: start on a city street, never in space.
   const scene = new THREE.Scene();
+  const assetLoader = new AssetLoader();
+  const activeAssets = new Set();
   scene.background = new THREE.Color(0xb9cbd5);
   scene.fog = new THREE.FogExp2(0xb9cbd5, 0.00135);
 
@@ -676,6 +679,7 @@ try {
     );
 
     // Gentle sunlit ambience without a space backdrop.
+    for (const asset of activeAssets) asset.update(dt);
     renderer.render(scene,camera);
 
     if(now>2500) intro.style.opacity="0.2";
@@ -686,6 +690,52 @@ try {
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth,innerHeight);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+  });
+
+  window.ourSearchWorld = {
+    async loadModel(url, options = {}) {
+      const asset = await assetLoader.load(url, options);
+      scene.add(asset.model);
+      activeAssets.add(asset);
+      return asset;
+    },
+    removeModel(asset) {
+      if (!activeAssets.delete(asset)) return;
+      scene.remove(asset.model);
+      asset.dispose();
+    },
+    async spawnCar() {
+      const car = await this.loadModel(
+        "./assets/plymouth-hemi-cuda-1971.glb",
+        { position: [4.5, 0, 8] }
+      );
+
+      const bounds = new THREE.Box3().setFromObject(car.model);
+      const size = new THREE.Vector3();
+      bounds.getSize(size);
+      const horizontalSize = Math.max(size.x, size.z);
+
+      if (!Number.isFinite(horizontalSize) || horizontalSize <= 0) {
+        this.removeModel(car);
+        throw new Error("Car model has no measurable dimensions.");
+      }
+
+      car.model.scale.setScalar(4.6 / horizontalSize);
+      car.model.updateMatrixWorld(true);
+
+      const groundBounds = new THREE.Box3().setFromObject(car.model);
+      car.model.position.y +=
+        hill(car.model.position.x, car.model.position.z) - groundBounds.min.y;
+
+      return car;
+    }
+  };
+
+  window.ourSearchWorld.spawnCar().then(() => {
+    console.info("Plymouth Hemi Cuda loaded into OUR SEARCH world.");
+  }).catch((err) => {
+    console.error("Could not load the Plymouth car model:", err);
+    status.textContent = "CAR LOAD FAILED — CHECK CONNECTION";
   });
 
   status.textContent="SAN FRANCISCO · CITY WORLD";
