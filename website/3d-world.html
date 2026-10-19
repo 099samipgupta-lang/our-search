@@ -435,126 +435,368 @@ try {
   const roofMaterial = mat(0x343e49, 0.88);
   const rooftopMaterial = mat(0x505962, 0.82);
 
-  // Store window transforms and draw each material as one instanced mesh.
-  const windowInstances = windowMats.map(() => []);
-  const windowDummy = new THREE.Object3D();
-  const windowGeometry = new THREE.BoxGeometry(1, 1, 1);
 
-  function addWindowInstance(x, y, z, width, height, depth,
-                              materialIndex, rotationY = 0) {
-    windowDummy.position.set(x, y, z);
-    windowDummy.rotation.set(0, rotationY, 0);
-    windowDummy.scale.set(width, height, depth);
-    windowDummy.updateMatrix();
-    windowInstances[materialIndex].push(windowDummy.matrix.clone());
+  // CALIFORNIA CITY ARCHITECTURE UPGRADE
+  // Preserve terrain, road network, player, traffic and landmarks.
+  // Repeated facade details are instanced to reduce draw calls.
+
+  const cityWindowInstances = windowMats.map(() => []);
+  const cityWindowDummy = new THREE.Object3D();
+  const cityWindowGeometry = new THREE.BoxGeometry(1, 1, 1);
+
+  const cityTrimLight = mat(0xe6dccb, 0.78, 0.02);
+  const cityTrimDark = mat(0x514a43, 0.84, 0.01);
+  const cityConcrete = mat(0x9c988f, 0.88, 0.01);
+  const cityTerracotta = mat(0xa75f45, 0.80, 0.01);
+  const cityMetal = mat(0x343b40, 0.48, 0.42);
+  const cityAwning = mat(0x9c4937, 0.72, 0.02);
+
+  const cityStoreGlass = new THREE.MeshStandardMaterial({
+    color: 0x314a57, roughness: 0.24, metalness: 0.24
+  });
+  const cityBalconyGlass = new THREE.MeshStandardMaterial({
+    color: 0x9eb9bf, roughness: 0.28, metalness: 0.10,
+    transparent: true, opacity: 0.72, depthWrite: false
+  });
+
+  // Shared detail-material batches:
+  // 0 light trim, 1 dark trim, 2 concrete, 3 terracotta,
+  // 4 metal, 5 awnings/sign fascia, 6 shop glazing, 7 balcony glazing.
+  const cityDetailMaterials = [
+    cityTrimLight, cityTrimDark, cityConcrete, cityTerracotta,
+    cityMetal, cityAwning, cityStoreGlass, cityBalconyGlass
+  ];
+  const cityDetailInstances = cityDetailMaterials.map(() => []);
+  const cityDetailGeometry = new THREE.BoxGeometry(1, 1, 1);
+  const cityDetailDummy = new THREE.Object3D();
+
+  function addCityDetail(x, y, z, sx, sy, sz, materialIndex) {
+    if (
+      ![x, y, z, sx, sy, sz].every(Number.isFinite) ||
+      sx <= 0 || sy <= 0 || sz <= 0
+    ) return;
+
+    cityDetailDummy.position.set(x, y, z);
+    cityDetailDummy.rotation.set(0, 0, 0);
+    cityDetailDummy.scale.set(sx, sy, sz);
+    cityDetailDummy.updateMatrix();
+    cityDetailInstances[materialIndex].push(cityDetailDummy.matrix.clone());
   }
 
-  function addBuilding(x,z,w,d,h,color) {
-    const baseY = hill(x,z);
-    const facade = facadeMaterials.get(color) || mat(color,0.76,0.06);
+  function addCityWindow(x, y, z, width, height, depth, materialIndex) {
+    cityWindowDummy.position.set(x, y, z);
+    cityWindowDummy.rotation.set(0, 0, 0);
+    cityWindowDummy.scale.set(width, height, depth);
+    cityWindowDummy.updateMatrix();
+    cityWindowInstances[materialIndex].push(cityWindowDummy.matrix.clone());
+  }
 
-    box(w,h,d,facade,x,baseY+h/2,z);
+  function addFramedCityWindow(x, y, z, width, height, face, materialIndex) {
+    const frame = 0.065;
+    const sill = 0.085;
+    let px = x, pz = z, pw = width, pd = 0.045;
 
-    // Roof edge and rooftop equipment.
-    box(w+0.25,0.35,d+0.25,roofMaterial,
-        x,baseY+h+0.15,z,false);
+    if (face === "front" || face === "back") {
+      const direction = face === "front" ? 1 : -1;
+      pz += direction * 0.035;
 
-    if (h>16) {
-      box(w*0.28,1.4,d*0.3,rooftopMaterial,
-          x,baseY+h+0.95,z,false);
+      addCityDetail(x, y + height / 2 + frame / 2, pz,
+        width + frame * 2, frame, 0.075, 0);
+      addCityDetail(x, y - height / 2 - sill / 2, pz,
+        width + frame * 2.5, sill, 0.13, 0);
+      addCityDetail(x - width / 2 - frame / 2, y, pz,
+        frame, height, 0.075, 0);
+      addCityDetail(x + width / 2 + frame / 2, y, pz,
+        frame, height, 0.075, 0);
+    } else {
+      const direction = face === "right" ? 1 : -1;
+      px += direction * 0.035;
+      pw = 0.045;
+      pd = width;
+
+      addCityDetail(px, y + height / 2 + frame / 2, z,
+        0.075, frame, width + frame * 2, 0);
+      addCityDetail(px, y - height / 2 - sill / 2, z,
+        0.13, sill, width + frame * 2.5, 0);
+      addCityDetail(px, y, z - width / 2 - frame / 2,
+        0.075, height, frame, 0);
+      addCityDetail(px, y, z + width / 2 + frame / 2,
+        0.075, height, frame, 0);
     }
 
-    // Detailed windows, batched later into instanced meshes.
-    const floors = Math.min(7, Math.max(2, Math.floor(h / 3.2)));
-    const columns = Math.min(4, Math.max(2, Math.floor(w / 2.5)));
-    const rows = Math.min(4, Math.max(2, Math.floor(d / 2.5)));
+    addCityWindow(px, y, pz, pw, height, pd, materialIndex);
+  }
+
+  function addStorefront(x, z, w, d, baseY, kind) {
+    const frontZ = z + d / 2 + 0.09;
+    const groundHeight = Math.min(3.0, Math.max(2.35, w * 0.23));
+    const doorWidth = Math.min(1.15, w * 0.17);
+    const bays = Math.max(2, Math.min(5, Math.floor(w / 2.1)));
+    const bayWidth = (w - 0.5) / bays;
+
+    for (let i = 0; i < bays; i++) {
+      const px = x - w / 2 + 0.25 + bayWidth * (i + 0.5);
+      const panelWidth = Math.max(0.3, bayWidth - 0.12);
+
+      addCityDetail(px, baseY + groundHeight * 0.52, frontZ,
+        panelWidth, groundHeight * 0.76, 0.055, 6);
+
+      addCityDetail(px - panelWidth / 2, baseY + groundHeight * 0.52,
+        frontZ + 0.04, 0.045, groundHeight * 0.82, 0.075, 4);
+      addCityDetail(px + panelWidth / 2, baseY + groundHeight * 0.52,
+        frontZ + 0.04, 0.045, groundHeight * 0.82, 0.075, 4);
+    }
+
+    // Dark entrance, shop sign band and optional awning.
+    addCityDetail(x, baseY + groundHeight * 0.52, frontZ + 0.055,
+      doorWidth, groundHeight * 0.78, 0.08, 1);
+    addCityDetail(x, baseY + groundHeight + 0.12, frontZ + 0.08,
+      w * 0.88, 0.23, 0.15, kind === "retail" ? 5 : 0);
+
+    if (kind === "retail") {
+      addCityDetail(x, baseY + groundHeight + 0.43, frontZ + 0.18,
+        w * 0.76, 0.10, 0.32, 5);
+    }
+  }
+
+  function addBalcony(x, z, w, d, y, width) {
+    const faceZ = z + d / 2 + 0.72;
+
+    addCityDetail(x, y - 0.08, faceZ, width, 0.15, 1.25, 2);
+    addCityDetail(x, y + 0.35, faceZ, width, 0.055, 0.055, 4);
+    addCityDetail(x - width / 2, y + 0.16, faceZ,
+      0.055, 0.38, 0.055, 4);
+    addCityDetail(x + width / 2, y + 0.16, faceZ,
+      0.055, 0.38, 0.055, 4);
+    addCityDetail(x, y + 0.16, faceZ,
+      Math.max(0.1, width - 0.12), 0.26, 0.035, 7);
+
+    for (let i = 1; i < 4; i++) {
+      addCityDetail(x - width / 2 + width * i / 4, y + 0.16, faceZ,
+        0.035, 0.35, 0.045, 4);
+    }
+  }
+
+  function addBuilding(x, z, w, d, h, color, gx = 0, gz = 0) {
+    const baseY = hill(x, z);
+    const facade = facadeMaterials.get(color) || mat(color, 0.82, 0.01);
+    const downtown = Math.abs(gx) < 3 && Math.abs(gz) < 4;
+    const tower = downtown && h >= 48;
+    const roll = rand();
+
+    let kind;
+    if (tower) kind = "tower";
+    else if (h >= 27) kind = roll < 0.55 ? "office" : "apartment";
+    else if (roll < 0.34) kind = "retail";
+    else if (roll < 0.70) kind = "residential";
+    else kind = "apartment";
+
+    const floorHeight = kind === "tower" ? 3.7 :
+      kind === "office" ? 3.45 : kind === "retail" ? 3.35 : 3.05;
+    const groundHeight = kind === "tower" ? 5.6 :
+      kind === "retail" ? 3.25 : 2.8;
+    const podiumHeight = tower ? Math.min(7, h * 0.16) : 0;
+
+    if (tower) {
+      box(w + 2, podiumHeight, d + 2, facade,
+        x, baseY + podiumHeight / 2, z);
+      box(w, h - podiumHeight, d, facade,
+        x, baseY + podiumHeight + (h - podiumHeight) / 2, z);
+    } else {
+      box(w, h, d, facade, x, baseY + h / 2, z);
+    }
+
+    const frontZ = z + d / 2 + 0.06;
+    const backZ = z - d / 2 - 0.06;
+    const leftX = x - w / 2 - 0.06;
+    const rightX = x + w / 2 + 0.06;
+
+    // Architectural corner pilasters.
+    const corner = kind === "tower" ? 0.23 : 0.17;
+    const pilasterMaterial = kind === "residential" ? 3 : 0;
+
+    for (const cx of [x - w / 2 + corner / 2, x + w / 2 - corner / 2]) {
+      addCityDetail(cx, baseY + h / 2, frontZ, corner, h, 0.11, pilasterMaterial);
+      addCityDetail(cx, baseY + h / 2, backZ, corner, h, 0.11, pilasterMaterial);
+    }
+
+    for (const cz of [z - d / 2 + corner / 2, z + d / 2 - corner / 2]) {
+      addCityDetail(leftX, baseY + h / 2, cz, 0.11, h, corner, pilasterMaterial);
+      addCityDetail(rightX, baseY + h / 2, cz, 0.11, h, corner, pilasterMaterial);
+    }
+
+    if (kind !== "tower" && kind !== "office") {
+      addCityDetail(x, baseY + 0.24, frontZ, w * 0.97, 0.48, 0.15, 2);
+      addCityDetail(x, baseY + 0.24, backZ, w * 0.97, 0.48, 0.15, 2);
+    }
+
+    if (["retail", "residential", "tower", "office"].includes(kind)) {
+      addStorefront(x, z, tower ? w + 2 : w, tower ? d + 2 : d,
+        baseY, kind === "retail" ? "retail" : "building");
+    }
+
+    const windowStart = baseY + podiumHeight + groundHeight;
+    const available = Math.max(0, baseY + h - windowStart - 0.65);
+    const floors = Math.min(kind === "tower" ? 24 : 10,
+      Math.max(1, Math.floor(available / floorHeight)));
+    const columns = Math.min(kind === "tower" ? 8 : 6,
+      Math.max(2, Math.floor(w / (kind === "tower" ? 2.0 : 1.8))));
+    const sideColumns = Math.min(6, Math.max(2, Math.floor(d / 1.9)));
+    const windowHeight = Math.min(kind === "tower" ? 1.85 : 1.5,
+      floorHeight * 0.57);
 
     for (let f = 0; f < floors; f++) {
-      const wy = baseY + 1.4 + f * 3.2;
+      const wy = windowStart + f * floorHeight + floorHeight * 0.53;
+      if (wy + windowHeight / 2 > baseY + h - 0.45) continue;
+
+      if (["apartment", "office", "tower"].includes(kind)) {
+        const band = kind === "tower" ? 2 : 0;
+        const bandY = wy - floorHeight * 0.43;
+        addCityDetail(x, bandY, frontZ, w, 0.07, 0.13, band);
+        addCityDetail(x, bandY, backZ, w, 0.07, 0.13, band);
+        addCityDetail(leftX, bandY, z, 0.13, 0.07, d, band);
+        addCityDetail(rightX, bandY, z, 0.13, 0.07, d, band);
+      }
 
       for (let c = 0; c < columns; c++) {
         const wx = x - w / 2 + (c + 0.5) * w / columns;
-        const ww = Math.min(0.9, w / columns * 0.48);
-
-        const frontMat = rand() < 0.10
-          ? 2 : Math.floor(rand() * windowMats.length);
+        const ww = Math.min(kind === "tower" ? 1.18 : 1.05,
+          w / columns * 0.55);
+        const frontMat = Math.floor(rand() * windowMats.length);
         const backMat = Math.floor(rand() * windowMats.length);
 
-        addWindowInstance(
-          wx, wy, z + d / 2 + 0.025, ww, 1.05, 0.045, frontMat
-        );
-        addWindowInstance(
-          wx, wy, z - d / 2 - 0.025, ww, 1.05, 0.045, backMat
-        );
+        addFramedCityWindow(wx, wy, z + d / 2, ww, windowHeight, "front", frontMat);
+        addFramedCityWindow(wx, wy, z - d / 2, ww, windowHeight, "back", backMat);
+
+        if ((kind === "apartment" || kind === "residential") &&
+            f > 0 && f % 2 === 0 && rand() < 0.30 && ww > 0.72) {
+          addBalcony(wx, z, w, d, wy - 0.1,
+            Math.min(ww + 0.6, w / columns * 0.8));
+        }
       }
 
-      for (let c = 0; c < rows; c++) {
-        const wz = z - d / 2 + (c + 0.5) * d / rows;
-        const ww = Math.min(0.9, d / rows * 0.48);
-        const rightMat = Math.floor(rand() * windowMats.length);
-        const leftMat = Math.floor(rand() * windowMats.length);
+      for (let c = 0; c < sideColumns; c++) {
+        const wz = z - d / 2 + (c + 0.5) * d / sideColumns;
+        const ww = Math.min(1.0, d / sideColumns * 0.55);
 
-        addWindowInstance(
-          x + w / 2 + 0.025, wy, wz, 0.045, 1.05, ww,
-          rightMat, Math.PI / 2
-        );
-        addWindowInstance(
-          x - w / 2 - 0.025, wy, wz, 0.045, 1.05, ww,
-          leftMat, Math.PI / 2
-        );
+        addFramedCityWindow(x + w / 2, wy, wz, ww, windowHeight,
+          "right", Math.floor(rand() * windowMats.length));
+        addFramedCityWindow(x - w / 2, wy, wz, ww, windowHeight,
+          "left", Math.floor(rand() * windowMats.length));
+      }
+    }
+
+    // Finished roof silhouette with parapets and coping.
+    const roofY = baseY + h;
+    const parapetHeight = kind === "tower" ? 0.8 : 0.42;
+    const parapetThickness = kind === "tower" ? 0.22 : 0.16;
+
+    addCityDetail(x, roofY - parapetHeight / 2, frontZ,
+      w + 0.15, parapetHeight, parapetThickness, 1);
+    addCityDetail(x, roofY - parapetHeight / 2, backZ,
+      w + 0.15, parapetHeight, parapetThickness, 1);
+    addCityDetail(leftX, roofY - parapetHeight / 2, z,
+      parapetThickness, parapetHeight, d + 0.15, 1);
+    addCityDetail(rightX, roofY - parapetHeight / 2, z,
+      parapetThickness, parapetHeight, d + 0.15, 1);
+
+    addCityDetail(x, roofY + 0.035, frontZ, w + 0.28, 0.09, 0.24, 2);
+    addCityDetail(x, roofY + 0.035, backZ, w + 0.28, 0.09, 0.24, 2);
+
+    if (h > 16) {
+      const rw = Math.min(w * 0.46, 5.2);
+      const rd = Math.min(d * 0.44, 4.8);
+      const rh = kind === "tower" ? 2.8 : 1.65;
+
+      box(rw, rh, rd, rooftopMaterial,
+        x - w * 0.12, roofY + rh / 2, z - d * 0.08);
+
+      for (let i = 0; i < 3; i++) {
+        addCityDetail(x - rw * 0.28 + i * rw * 0.28,
+          roofY + rh + 0.12, z + rd * 0.12,
+          0.28, 0.24, rd * 0.52, 4);
+      }
+    }
+
+    if (kind === "residential") {
+      for (const yy of [baseY + 0.72, baseY + h - 0.85]) {
+        addCityDetail(x, yy, frontZ, w * 0.96, 0.11, 0.16, 0);
+        addCityDetail(x, yy, backZ, w * 0.96, 0.11, 0.16, 0);
       }
     }
   }
 
-  // Blocks distributed around the player's starting street.
-  for (let gx=-5; gx<=5; gx++) {
-    for (let gz=-6; gz<=6; gz++) {
-      const bx=gx*blockStep;
-      const bz=gz*blockStep;
+  // Denser downtown parcels and smaller buildings toward outer districts.
+  for (let gx = -5; gx <= 5; gx++) {
+    for (let gz = -6; gz <= 6; gz++) {
+      const bx = gx * blockStep;
+      const bz = gz * blockStep;
 
-      // Keep the starting area open so the player is immediately visible.
-      if (Math.abs(bx)<17 && Math.abs(bz)<24) continue;
+      // Preserve the original clear starting area.
+      if (Math.abs(bx) < 17 && Math.abs(bz) < 24) continue;
 
-      const count=1+Math.floor(rand()*2);
+      const downtown = Math.abs(gx) < 3 && Math.abs(gz) < 4;
+      const count = downtown ? 2 : (rand() < 0.58 ? 2 : 1);
 
-      for (let n=0;n<count;n++) {
-        const w=7+rand()*7;
-        const d=7+rand()*7;
-        const x=bx+(rand()-.5)*17;
-        const z=bz+(rand()-.5)*17;
-        let h=9+rand()*48;
+      for (let n = 0; n < count; n++) {
+        const x = bx + (rand() - 0.5) * 16;
+        const z = bz + (rand() - 0.5) * 16;
+        let w = 7.5 + rand() * 7;
+        let d = 7 + rand() * 7;
+        let h = 9 + rand() * 22;
 
-        // A few tall downtown towers.
-        if (Math.abs(gx)<3 && Math.abs(gz)<4 && rand()>.45) {
-          h=55+rand()*85;
+        if (downtown && rand() > 0.42) {
+          h = 48 + rand() * 72;
+          w = 10 + rand() * 7;
+          d = 10 + rand() * 6;
+        } else if (downtown && rand() > 0.40) {
+          h = 24 + rand() * 22;
+          w = 9 + rand() * 6;
+          d = 9 + rand() * 5;
+        } else if (Math.abs(gx) >= 4 || Math.abs(gz) >= 5) {
+          h = 7.5 + rand() * 13;
+          w = 7 + rand() * 6;
+          d = 7 + rand() * 6;
         }
 
-        // Lower neighbourhood buildings toward the outer districts.
-        if (Math.abs(gx)>5 || Math.abs(gz)>7) h=8+rand()*17;
-
-        const color=facadeColors[Math.floor(rand()*facadeColors.length)];
-        addBuilding(x,z,w,d,h,color);
+        const color = facadeColors[Math.floor(rand() * facadeColors.length)];
+        addBuilding(x, z, w, d, h, color, gx, gz);
       }
     }
   }
 
-
-  // Render all windows in a small number of GPU draw batches.
-  for (let i = 0; i < windowInstances.length; i++) {
-    const matrices = windowInstances[i];
-    if (matrices.length === 0) continue;
+  // GPU-batch all window panes.
+  for (let i = 0; i < cityWindowInstances.length; i++) {
+    const matrices = cityWindowInstances[i];
+    if (!matrices.length) continue;
 
     const batch = new THREE.InstancedMesh(
-      windowGeometry, windowMats[i], matrices.length
+      cityWindowGeometry, windowMats[i], matrices.length
     );
-
     for (let j = 0; j < matrices.length; j++) {
       batch.setMatrixAt(j, matrices[j]);
     }
-
     batch.instanceMatrix.needsUpdate = true;
     batch.castShadow = false;
     batch.receiveShadow = false;
+    scene.add(batch);
+  }
+
+  // GPU-batch trim, frames, sills, parapets, signs and balcony details.
+  for (let i = 0; i < cityDetailInstances.length; i++) {
+    const matrices = cityDetailInstances[i];
+    if (!matrices.length) continue;
+
+    const batch = new THREE.InstancedMesh(
+      cityDetailGeometry, cityDetailMaterials[i], matrices.length
+    );
+    for (let j = 0; j < matrices.length; j++) {
+      batch.setMatrixAt(j, matrices[j]);
+    }
+    batch.instanceMatrix.needsUpdate = true;
+    batch.castShadow = false;
+    batch.receiveShadow = false;
+    if (i === 7) batch.renderOrder = 2;
     scene.add(batch);
   }
 
