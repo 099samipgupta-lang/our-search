@@ -1685,8 +1685,47 @@ try {
   bindButton("left","a");
   bindButton("right","d");
 
+  /* OUR_SEARCH_PERFORMANCE_MONITOR */
+  const perfHud = document.createElement("div");
+  perfHud.id = "our-search-performance-monitor";
+  perfHud.style.cssText = [
+    "position:fixed",
+    "top:10px",
+    "left:10px",
+    "z-index:999999",
+    "padding:9px 11px",
+    "background:rgba(0,0,0,0.82)",
+    "color:#8dffb0",
+    "font:12px/1.6 monospace",
+    "white-space:pre",
+    "pointer-events:none",
+    "border:1px solid rgba(141,255,176,0.45)",
+    "border-radius:6px"
+  ].join(";");
+  perfHud.textContent = "OUR SEARCH PERFORMANCE\nMeasuring...";
+  document.body.appendChild(perfHud);
+
+  let perfFrames = 0;
+  let perfWindowStart = performance.now();
+  let perfPreviousFrame = null;
+  let perfFrameMs = 0;
+
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key.toLowerCase() === "p" && !event.repeat) {
+      perfHud.style.display =
+        perfHud.style.display === "none" ? "block" : "none";
+    }
+  });
+
   function animate(now) {
     requestAnimationFrame(animate);
+    if (perfPreviousFrame !== null) {
+      perfFrameMs = now - perfPreviousFrame;
+    }
+    perfPreviousFrame = now;
+    perfFrames++;
+
     const dt=Math.min((now-lastTime)/1000,0.04);
     lastTime=now;
 
@@ -1736,6 +1775,26 @@ try {
     // Gentle sunlit ambience without a space backdrop.
     for (const asset of activeAssets) asset.update(dt);
     renderer.render(scene,camera);
+
+    if (now - perfWindowStart >= 500) {
+      const elapsed = now - perfWindowStart;
+      const fps = perfFrames * 1000 / elapsed;
+      const info = renderer.info;
+
+      perfHud.textContent = [
+        "OUR SEARCH PERFORMANCE",
+        "FPS: " + fps.toFixed(1),
+        "Frame time: " + perfFrameMs.toFixed(1) + " ms",
+        "Draw calls: " + info.render.calls,
+        "Triangles: " + info.render.triangles.toLocaleString(),
+        "Geometries: " + info.memory.geometries,
+        "Textures: " + info.memory.textures,
+        "P = performance monitor"
+      ].join("\n");
+
+      perfFrames = 0;
+      perfWindowStart = now;
+    }
 
     if(now>2500) intro.style.opacity="0.2";
   }
