@@ -881,8 +881,16 @@ try {
     );
   }
 
+  const heroHousePlacements = [];
+
   function addBuilding(x, z, w, d, h, color, gx = 0, gz = 0) {
     const baseY = hill(x, z);
+
+    // One real GLB showcase home; all other properties keep existing generation.
+    if (gx === -5 && gz === -4 && h < 24) {
+      heroHousePlacements.push({ x, z, w, d, h, color, gx, gz, baseY });
+      return;
+    }
 
     // Outer districts use dedicated houses, mansions and palatial villas.
     if (!(Math.abs(gx) < 3 && Math.abs(gz) < 4) && h < 24) {
@@ -1072,6 +1080,64 @@ try {
 
         const color = facadeColors[Math.floor(rand() * facadeColors.length)];
         addBuilding(x, z, w, d, h, color, gx, gz);
+      }
+    }
+  }
+
+  // REAL GLB SHOWCASE HOUSE: fit the model to its parcel and terrain.
+  if (heroHousePlacements.length) {
+    try {
+      for (const property of heroHousePlacements) {
+        const loadedHouse = await assetLoader.load(
+          "./assets/city_models/detached-two-storey-house.glb",
+          {
+            position: [0, 0, 0],
+            scale: 1,
+            castShadow: true,
+            receiveShadow: true
+          }
+        );
+
+        const house = loadedHouse.model;
+        const originalBounds = new THREE.Box3().setFromObject(house);
+        const originalSize = new THREE.Vector3();
+        originalBounds.getSize(originalSize);
+
+        if (
+          originalSize.x <= 0 ||
+          originalSize.y <= 0 ||
+          originalSize.z <= 0
+        ) {
+          throw new Error("House model has invalid dimensions");
+        }
+
+        // Preserve proportions while fitting the house inside its parcel.
+        const fitScale = Math.min(
+          property.w * 0.90 / originalSize.x,
+          property.d * 0.90 / originalSize.z
+        );
+        house.scale.setScalar(fitScale);
+
+        const fittedBounds = new THREE.Box3().setFromObject(house);
+        const fittedCenter = new THREE.Vector3();
+        fittedBounds.getCenter(fittedCenter);
+
+        house.position.x += property.x - fittedCenter.x;
+        house.position.z += property.z - fittedCenter.z;
+        house.position.y += property.baseY - fittedBounds.min.y;
+
+        scene.add(house);
+      }
+
+      console.info("PASS: real GLB showcase house loaded");
+    } catch (error) {
+      console.error("GLB house failed; restoring procedural fallback:", error);
+
+      for (const property of heroHousePlacements) {
+        addSuburbanProperty(
+          property.x, property.z, property.w, property.d,
+          property.color, property.baseY
+        );
       }
     }
   }
