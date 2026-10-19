@@ -316,6 +316,7 @@ try {
   // Shared materials keep the city rendering more efficiently.
     // Subtle, fine-grained stucco surface for California-style facades.
   // Shared textures keep GPU memory and draw calls under control.
+  // Procedural stucco texture retained as a fallback.
   const facadeSurfaceTexture = (() => {
     const canvas = document.createElement("canvas");
     canvas.width = 256;
@@ -332,7 +333,6 @@ try {
     }
     ctx.putImageData(pixels, 0, 0);
 
-    // Broad, very subtle plaster variation prevents a perfectly flat finish.
     for (let i = 0; i < 220; i++) {
       const shade = Math.random() < 0.5 ? 125 : 255;
       ctx.fillStyle = `rgba(${shade},${shade},${shade},0.045)`;
@@ -372,6 +372,66 @@ try {
       })
     ])
   );
+
+  // Shared Poly Haven White Stucco 02 PBR maps.
+  const facadeLoader = new THREE.TextureLoader();
+  const facadeMaterialList = [...facadeMaterials.values()];
+
+  function configureFacadeMap(texture, isColorMap = false) {
+    if (isColorMap) {
+      texture.colorSpace = THREE.SRGBColorSpace;
+    }
+    texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(2, 3);
+    texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    return texture;
+  }
+
+  facadeLoader.load(
+    "./assets/city_materials/stucco_diffuse_1k.jpg",
+    texture => {
+      configureFacadeMap(texture, true);
+      for (const material of facadeMaterialList) {
+        material.map = texture;
+        material.needsUpdate = true;
+      }
+      console.info("City stucco color map loaded.");
+    },
+    undefined,
+    error => console.warn("Stucco color map failed; procedural fallback remains active.", error)
+  );
+
+  facadeLoader.load(
+    "./assets/city_materials/stucco_normal_1k.png",
+    texture => {
+      configureFacadeMap(texture);
+      for (const material of facadeMaterialList) {
+        material.normalMap = texture;
+        material.normalScale.set(0.35, 0.35);
+        material.bumpMap = null;
+        material.needsUpdate = true;
+      }
+      console.info("City stucco normal map loaded.");
+    },
+    undefined,
+    error => console.warn("Stucco normal map failed; fallback surface remains active.", error)
+  );
+
+  facadeLoader.load(
+    "./assets/city_materials/stucco_roughness_1k.jpg",
+    texture => {
+      configureFacadeMap(texture);
+      for (const material of facadeMaterialList) {
+        material.roughnessMap = texture;
+        material.roughness = 0.92;
+        material.needsUpdate = true;
+      }
+      console.info("City stucco roughness map loaded.");
+    },
+    undefined,
+    error => console.warn("Stucco roughness map failed; default roughness remains active.", error)
+  );
+
   const roofMaterial = mat(0x343e49, 0.88);
   const rooftopMaterial = mat(0x505962, 0.82);
 
