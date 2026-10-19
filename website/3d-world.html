@@ -554,8 +554,8 @@ try {
         color,
         map: facadeSurfaceTexture.map,
         bumpMap: facadeSurfaceTexture.bumpMap,
-        bumpScale: 0.012,
-        roughness: 0.92,
+        bumpScale: 0.018,
+        roughness: 0.90,
         metalness: 0.0
       })
     ])
@@ -595,7 +595,7 @@ try {
       configureFacadeMap(texture);
       for (const material of facadeMaterialList) {
         material.normalMap = texture;
-        material.normalScale.set(0.35, 0.35);
+        material.normalScale.set(0.50, 0.50);
         material.bumpMap = null;
         material.needsUpdate = true;
       }
@@ -611,7 +611,7 @@ try {
       configureFacadeMap(texture);
       for (const material of facadeMaterialList) {
         material.roughnessMap = texture;
-        material.roughness = 0.92;
+        material.roughness = 0.90;
         material.needsUpdate = true;
       }
       console.info("City stucco roughness map loaded.");
@@ -636,14 +636,14 @@ try {
   const cityTrimDark = mat(0x514a43, 0.84, 0.01);
   const cityConcrete = mat(0x9c988f, 0.88, 0.01);
   const cityTerracotta = mat(0xa75f45, 0.80, 0.01);
-  const cityMetal = mat(0x343b40, 0.48, 0.42);
+  const cityMetal = mat(0x343b40, 0.36, 0.58);
   const cityAwning = mat(0x9c4937, 0.72, 0.02);
 
   const cityStoreGlass = new THREE.MeshStandardMaterial({
-    color: 0x314a57, roughness: 0.24, metalness: 0.24
+    color: 0x314a57, roughness: 0.19, metalness: 0.16
   });
   const cityBalconyGlass = new THREE.MeshStandardMaterial({
-    color: 0x9eb9bf, roughness: 0.28, metalness: 0.10,
+    color: 0x9eb9bf, roughness: 0.22, metalness: 0.08,
     transparent: true, opacity: 0.72, depthWrite: false
   });
 
@@ -654,6 +654,106 @@ try {
     cityTrimLight, cityTrimDark, cityConcrete, cityTerracotta,
     cityMetal, cityAwning, cityStoreGlass, cityBalconyGlass
   ];
+  // OUR_SEARCH_PBR_SURFACE_UPGRADE_V1
+  // Shared procedural concrete and masonry maps for existing detail meshes.
+  // These add surface information without adding objects or draw calls.
+  function createArchitecturalSurface(kind) {
+    const size = 256;
+    const colorCanvas = document.createElement("canvas");
+    const reliefCanvas = document.createElement("canvas");
+    const roughCanvas = document.createElement("canvas");
+
+    for (const canvas of [colorCanvas, reliefCanvas, roughCanvas]) {
+      canvas.width = canvas.height = size;
+    }
+
+    const colorCtx = colorCanvas.getContext("2d");
+    const reliefCtx = reliefCanvas.getContext("2d");
+    const roughCtx = roughCanvas.getContext("2d");
+    const colorImage = colorCtx.createImageData(size, size);
+    const reliefImage = reliefCtx.createImageData(size, size);
+    const roughImage = roughCtx.createImageData(size, size);
+    const isMasonry = kind === "masonry";
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = (y * size + x) * 4;
+        const wave = Math.sin(x * 0.11 + Math.sin(y * 0.07)) * 4;
+        const noise = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+        const grain = noise - Math.floor(noise) - 0.5;
+
+        let tone = 222 + wave + grain * 25;
+        let relief = 132 + wave * 2 + grain * 42;
+        let rough = 218 + grain * 24;
+
+        if (isMasonry) {
+          const row = Math.floor(y / 24);
+          const rowOffset = row % 2 ? 16 : 0;
+          const localX = ((x + rowOffset) % 32 + 32) % 32;
+          const localY = y % 24;
+          const mortar = localY < 2 || localX < 2;
+
+          tone = mortar ? 112 + grain * 10 : 218 + wave + grain * 17;
+          relief = mortar ? 76 + grain * 8 : 158 + wave + grain * 25;
+          rough = mortar ? 242 : 205 + grain * 20;
+        } else {
+          // Subtle horizontal casting marks and mineral speckling.
+          if (y % 64 < 2) {
+            tone -= 8;
+            relief -= 18;
+          }
+        }
+
+        for (const [data, value] of [
+          [colorImage.data, tone],
+          [reliefImage.data, relief],
+          [roughImage.data, rough]
+        ]) {
+          const v = Math.max(0, Math.min(255, Math.round(value)));
+          data[i] = data[i + 1] = data[i + 2] = v;
+          data[i + 3] = 255;
+        }
+      }
+    }
+
+    colorCtx.putImageData(colorImage, 0, 0);
+    reliefCtx.putImageData(reliefImage, 0, 0);
+    roughCtx.putImageData(roughImage, 0, 0);
+
+    function makeMap(canvas, isColor = false) {
+      const texture = new THREE.CanvasTexture(canvas);
+      if (isColor) texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.repeat.set(2, 2);
+      texture.anisotropy = Math.min(
+        8, renderer.capabilities.getMaxAnisotropy()
+      );
+      return texture;
+    }
+
+    return {
+      map: makeMap(colorCanvas, true),
+      bumpMap: makeMap(reliefCanvas),
+      roughnessMap: makeMap(roughCanvas)
+    };
+  }
+
+  const concreteSurface = createArchitecturalSurface("concrete");
+  cityConcrete.map = concreteSurface.map;
+  cityConcrete.bumpMap = concreteSurface.bumpMap;
+  cityConcrete.bumpScale = 0.035;
+  cityConcrete.roughnessMap = concreteSurface.roughnessMap;
+  cityConcrete.roughness = 0.90;
+  cityConcrete.needsUpdate = true;
+
+  const masonrySurface = createArchitecturalSurface("masonry");
+  cityTerracotta.map = masonrySurface.map;
+  cityTerracotta.bumpMap = masonrySurface.bumpMap;
+  cityTerracotta.bumpScale = 0.045;
+  cityTerracotta.roughnessMap = masonrySurface.roughnessMap;
+  cityTerracotta.roughness = 0.88;
+  cityTerracotta.needsUpdate = true;
+
   const cityDetailInstances = cityDetailMaterials.map(() => []);
   const cityDetailGeometry = new THREE.BoxGeometry(1, 1, 1);
   const cityDetailDummy = new THREE.Object3D();
@@ -1231,7 +1331,7 @@ try {
     const colorMap = new THREE.CanvasTexture(tileCanvas);
     colorMap.colorSpace = THREE.SRGBColorSpace;
     colorMap.wrapS = colorMap.wrapT = THREE.RepeatWrapping;
-    colorMap.repeat.set(2, 2);
+    colorMap.repeat.set(3, 3);
     colorMap.anisotropy = Math.min(
       8, renderer.capabilities.getMaxAnisotropy()
     );
@@ -1248,7 +1348,7 @@ try {
     const maps = createRoofShingleMaps(roofMaterial.color);
     roofMaterial.map = maps.colorMap;
     roofMaterial.bumpMap = maps.bumpMap;
-    roofMaterial.bumpScale = 0.028;
+    roofMaterial.bumpScale = 0.042;
     roofMaterial.needsUpdate = true;
   }
 
