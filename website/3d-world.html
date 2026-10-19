@@ -390,6 +390,8 @@ try {
   scene.add(terrain);
 
   // Roads, lane markings and sidewalks follow the terrain elevation.
+  const ribbonBatches = new Map();
+
   function makeRibbon(width, length, axis, center, material, yOffset) {
     const segments = Math.ceil(length / 4);
     const positions = [];
@@ -428,22 +430,21 @@ try {
       }
     }
 
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(positions, 3)
-    );
-    geometry.setAttribute(
-      "uv",
-      new THREE.Float32BufferAttribute(uvs, 2)
-    );
-    geometry.setIndex(indices);
-    geometry.computeVertexNormals();
+    const batch = ribbonBatches.get(material) || {
+      positions: [],
+      uvs: [],
+      indices: []
+    };
 
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.receiveShadow = true;
-    scene.add(mesh);
-    return mesh;
+    const vertexOffset = batch.positions.length / 3;
+    batch.positions.push(...positions);
+    batch.uvs.push(...uvs);
+
+    for (const index of indices) {
+      batch.indices.push(index + vertexOffset);
+    }
+
+    ribbonBatches.set(material, batch);
   }
 
   const roadWidth = 12;
@@ -465,6 +466,27 @@ try {
       makeRibbon(2, roadLength, "z", p + side * 7.2, sidewalk, 0.13);
       makeRibbon(2, roadLength, "x", p + side * 7.2, sidewalk, 0.13);
     }
+  }
+
+  // One mesh per shared road-surface material.
+  // Preserve every ribbon's positions, UVs, and triangle winding.
+  for (const [material, batch] of ribbonBatches) {
+    const geometry = new THREE.BufferGeometry();
+
+    geometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute(batch.positions, 3)
+    );
+    geometry.setAttribute(
+      "uv",
+      new THREE.Float32BufferAttribute(batch.uvs, 2)
+    );
+    geometry.setIndex(batch.indices);
+    geometry.computeVertexNormals();
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
   }
 
   // CITY BUILDINGS: deterministic layout, not random every reload.
@@ -1066,6 +1088,45 @@ try {
     box(
       1.45, 0.10, 1.20, suburbanWalkMaterial,
       doorX, baseY + 0.05, frontZ + 0.67, false
+    );
+
+    // AAA ARCHITECTURAL FINISHING LAYER
+    // Shared instanced details: no new buildings or changes to placement.
+
+    // Defined corner boards add depth to the four exterior wall corners.
+    for (const sideX of [-1, 1]) {
+      for (const sideZ of [-1, 1]) {
+        addCityDetail(
+          x + sideX * (w / 2 + 0.025),
+          baseY + wallHeight / 2,
+          z + sideZ * (d / 2 + 0.025),
+          0.13, wallHeight, 0.13, 0
+        );
+      }
+    }
+
+    // Finished fascia along the front and rear gable edges.
+    for (const sideZ of [-1, 1]) {
+      addCityDetail(
+        x, roofBaseY + 0.045,
+        z + sideZ * (d / 2 + 0.12),
+        w + 0.42, 0.16, 0.12, 1
+      );
+    }
+
+    // Dark eave trim emphasizes the roof silhouette along both sides.
+    for (const sideX of [-1, 1]) {
+      addCityDetail(
+        x + sideX * (w / 2 + 0.10),
+        roofBaseY + 0.025, z,
+        0.12, 0.15, d + 0.38, 1
+      );
+    }
+
+    // A restrained ridge cap follows the peak of the existing gable roof.
+    addCityDetail(
+      x, roofBaseY + roofHeight - 0.035, z,
+      0.16, 0.10, d + 0.30, 1
     );
 
     // Continuous masonry plinth gives the existing house a grounded base.
