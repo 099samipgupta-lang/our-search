@@ -1709,6 +1709,14 @@ try {
   let perfWindowStart = performance.now();
   let perfPreviousFrame = null;
   let perfFrameMs = 0;
+  let perfFrameMsTotal = 0;
+  let perfFrameMsCount = 0;
+  let perfFrameMsMax = 0;
+  let perfUpdateMs = 0;
+  let perfRenderMs = 0;
+  let perfUpdateMsTotal = 0;
+  let perfRenderMsTotal = 0;
+  let perfSampleCount = 0;
 
 
   window.addEventListener("keydown", (event) => {
@@ -1722,10 +1730,14 @@ try {
     requestAnimationFrame(animate);
     if (perfPreviousFrame !== null) {
       perfFrameMs = now - perfPreviousFrame;
+      perfFrameMsTotal += perfFrameMs;
+      perfFrameMsCount++;
+      perfFrameMsMax = Math.max(perfFrameMsMax, perfFrameMs);
     }
     perfPreviousFrame = now;
     perfFrames++;
 
+    const perfUpdateStart = performance.now();
     const dt=Math.min((now-lastTime)/1000,0.04);
     lastTime=now;
 
@@ -1774,17 +1786,35 @@ try {
 
     // Gentle sunlit ambience without a space backdrop.
     for (const asset of activeAssets) asset.update(dt);
+    perfUpdateMs = performance.now() - perfUpdateStart;
+
+    const perfRenderStart = performance.now();
     renderer.render(scene,camera);
+    perfRenderMs = performance.now() - perfRenderStart;
+    perfUpdateMsTotal += perfUpdateMs;
+    perfRenderMsTotal += perfRenderMs;
+    perfSampleCount++;
 
     if (now - perfWindowStart >= 500) {
       const elapsed = now - perfWindowStart;
       const fps = perfFrames * 1000 / elapsed;
       const info = renderer.info;
 
+      const avgFrameMs = perfFrameMsCount
+        ? perfFrameMsTotal / perfFrameMsCount : 0;
+      const avgUpdateMs = perfSampleCount
+        ? perfUpdateMsTotal / perfSampleCount : 0;
+      const avgRenderMs = perfSampleCount
+        ? perfRenderMsTotal / perfSampleCount : 0;
+
       perfHud.textContent = [
         "OUR SEARCH PERFORMANCE",
         "FPS: " + fps.toFixed(1),
-        "Frame time: " + perfFrameMs.toFixed(1) + " ms",
+        "Avg frame interval: " + avgFrameMs.toFixed(1) + " ms",
+        "Last frame interval: " + perfFrameMs.toFixed(1) + " ms",
+        "Worst frame interval: " + perfFrameMsMax.toFixed(1) + " ms",
+        "World update (CPU): " + avgUpdateMs.toFixed(1) + " ms",
+        "Render call (CPU): " + avgRenderMs.toFixed(1) + " ms",
         "Draw calls: " + info.render.calls,
         "Triangles: " + info.render.triangles.toLocaleString(),
         "Geometries: " + info.memory.geometries,
@@ -1793,6 +1823,12 @@ try {
       ].join("\n");
 
       perfFrames = 0;
+      perfFrameMsTotal = 0;
+      perfFrameMsCount = 0;
+      perfFrameMsMax = 0;
+      perfUpdateMsTotal = 0;
+      perfRenderMsTotal = 0;
+      perfSampleCount = 0;
       perfWindowStart = now;
     }
 
