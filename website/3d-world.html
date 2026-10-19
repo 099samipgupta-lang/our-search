@@ -98,7 +98,7 @@ try {
   const assetLoader = new AssetLoader();
   const activeAssets = new Set();
   scene.background = new THREE.Color(0xb9cbd5);
-  scene.fog = new THREE.FogExp2(0xb9cbd5, 0.00135);
+  scene.fog = new THREE.FogExp2(0xb9cbd5, 0.00075);
 
   const camera = new THREE.PerspectiveCamera(
     65, innerWidth / innerHeight, 0.1, 1200
@@ -110,34 +110,94 @@ try {
   });
 
   renderer.setSize(innerWidth, innerHeight);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+  const renderPixelRatio = () => Math.min(window.devicePixelRatio || 1, 1.25);
+  renderer.setPixelRatio(renderPixelRatio());
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.18;
+  renderer.toneMappingExposure = 1.10;
   root.appendChild(renderer.domElement);
 
-  // CINEMATIC LIGHTING
-  scene.add(new THREE.HemisphereLight(0xd9eaff, 0x655044, 1.7));
+  // CINEMATIC WORLD LIGHTING + PROCEDURAL ENVIRONMENT.
+  // Enhances existing materials without adding buildings or meshes.
+  const environmentCanvas = document.createElement("canvas");
+  environmentCanvas.width = 1024;
+  environmentCanvas.height = 512;
 
-  const sun = new THREE.DirectionalLight(0xffd09a, 3.0);
+  const environmentCtx = environmentCanvas.getContext("2d");
+  if (!environmentCtx) throw new Error("Could not create environment texture.");
+
+  const skyGradient = environmentCtx.createLinearGradient(0, 0, 0, 512);
+  skyGradient.addColorStop(0.00, "#284768");
+  skyGradient.addColorStop(0.28, "#7297b3");
+  skyGradient.addColorStop(0.58, "#c1d0d2");
+  skyGradient.addColorStop(0.76, "#edc9a2");
+  skyGradient.addColorStop(1.00, "#5c5552");
+  environmentCtx.fillStyle = skyGradient;
+  environmentCtx.fillRect(0, 0, 1024, 512);
+
+  // Deterministic soft cloud layers for environment reflections.
+  for (let i = 0; i < 115; i++) {
+    const x = (i * 193.7 + 47) % 1024;
+    const y = 65 + ((i * 71.3) % 225);
+    const radiusX = 24 + ((i * 17) % 72);
+    const radiusY = 5 + ((i * 11) % 15);
+    const cloud = environmentCtx.createRadialGradient(
+      x, y, 2, x, y, radiusX
+    );
+    cloud.addColorStop(0, "rgba(255,246,229,0.16)");
+    cloud.addColorStop(0.55, "rgba(233,239,236,0.07)");
+    cloud.addColorStop(1, "rgba(233,239,236,0)");
+    environmentCtx.fillStyle = cloud;
+    environmentCtx.fillRect(
+      x - radiusX, y - radiusY,
+      radiusX * 2, radiusY * 2
+    );
+  }
+
+  const sunGlow = environmentCtx.createRadialGradient(
+    735, 170, 3, 735, 170, 105
+  );
+  sunGlow.addColorStop(0, "rgba(255,239,201,0.80)");
+  sunGlow.addColorStop(0.12, "rgba(255,222,174,0.34)");
+  sunGlow.addColorStop(1, "rgba(255,222,174,0)");
+  environmentCtx.fillStyle = sunGlow;
+  environmentCtx.fillRect(620, 55, 230, 230);
+
+  const environmentMap = new THREE.CanvasTexture(environmentCanvas);
+  environmentMap.mapping = THREE.EquirectangularReflectionMapping;
+  environmentMap.colorSpace = THREE.SRGBColorSpace;
+  environmentMap.needsUpdate = true;
+  scene.environment = environmentMap;
+  scene.environmentIntensity = 0.8;
+  scene.background = environmentMap;
+
+  scene.add(new THREE.HemisphereLight(0xdceaff, 0x5d493d, 1.15));
+
+  const sun = new THREE.DirectionalLight(0xffd3a2, 3.2);
   sun.position.set(-90, 150, 70);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(512, 512);
-  sun.shadow.camera.left = -100;
-  sun.shadow.camera.right = 100;
-  sun.shadow.camera.top = 100;
-  sun.shadow.camera.bottom = -100;
+  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.camera.left = -90;
+  sun.shadow.camera.right = 90;
+  sun.shadow.camera.top = 90;
+  sun.shadow.camera.bottom = -90;
   sun.shadow.camera.near = 1;
   sun.shadow.camera.far = 320;
-  sun.shadow.normalBias = 0.035;
-  sun.shadow.bias = -0.0003;
+  sun.shadow.camera.updateProjectionMatrix();
+  sun.shadow.bias = -0.00015;
+  sun.shadow.normalBias = 0.025;
+  sun.shadow.radius = 2;
   scene.add(sun);
 
-  const fill = new THREE.DirectionalLight(0x91bfe8, 0.7);
+  const fill = new THREE.DirectionalLight(0x9fc9ed, 0.75);
   fill.position.set(100, 55, -100);
   scene.add(fill);
+
+  const rim = new THREE.DirectionalLight(0xffd7b0, 0.30);
+  rim.position.set(35, 35, 100);
+  scene.add(rim);
 
   function mat(color, roughness=0.8, metalness=0) {
     return new THREE.MeshStandardMaterial({
@@ -145,8 +205,95 @@ try {
     });
   }
 
-  const asphalt = mat(0x303944);
-  const sidewalk = mat(0x858b8d);
+
+  // PROCEDURAL PBR SURFACES: reusable maps for existing terrain and roads.
+  // Texture generation only; adds no objects, buildings, or meshes.
+  function createProceduralSurfaceMaps(kind) {
+    const size = 256;
+    const colorCanvas = document.createElement("canvas");
+    const bumpCanvas = document.createElement("canvas");
+    const roughCanvas = document.createElement("canvas");
+
+    for (const canvas of [colorCanvas, bumpCanvas, roughCanvas]) {
+      canvas.width = canvas.height = size;
+    }
+
+    const colorCtx = colorCanvas.getContext("2d");
+    const bumpCtx = bumpCanvas.getContext("2d");
+    const roughCtx = roughCanvas.getContext("2d");
+    const colorImage = colorCtx.createImageData(size, size);
+    const bumpImage = bumpCtx.createImageData(size, size);
+    const roughImage = roughCtx.createImageData(size, size);
+
+    const isAsphalt = kind === "asphalt";
+    const isConcrete = kind === "concrete";
+    const base = isAsphalt ? 232 : (isConcrete ? 240 : 228);
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const i = (y * size + x) * 4;
+        const wave =
+          Math.sin(x * 0.071 + Math.sin(y * 0.027) * 1.7) +
+          Math.cos(y * 0.083 + Math.sin(x * 0.019));
+        const raw = Math.sin((x + 17) * 127.1 + (y + 31) * 311.7)
+          * 43758.5453;
+        const noise = raw - Math.floor(raw) - 0.5;
+
+        const tone = Math.max(0, Math.min(255,
+          base + wave * (isAsphalt ? 3 : 5)
+          + noise * (isAsphalt ? 20 : 13)
+        ));
+        const relief = Math.max(0, Math.min(255,
+          128 + wave * 5 + noise * (isAsphalt ? 38 : 22)
+        ));
+        const roughness = Math.max(0, Math.min(255,
+          (isAsphalt ? 238 : 242) + wave * 2 + noise * 8
+        ));
+
+        for (const [data, value] of [
+          [colorImage.data, tone],
+          [bumpImage.data, relief],
+          [roughImage.data, roughness]
+        ]) {
+          data[i] = data[i + 1] = data[i + 2] = value;
+          data[i + 3] = 255;
+        }
+      }
+    }
+
+    colorCtx.putImageData(colorImage, 0, 0);
+    bumpCtx.putImageData(bumpImage, 0, 0);
+    roughCtx.putImageData(roughImage, 0, 0);
+
+    const colorMap = new THREE.CanvasTexture(colorCanvas);
+    colorMap.colorSpace = THREE.SRGBColorSpace;
+    const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+    const roughnessMap = new THREE.CanvasTexture(roughCanvas);
+
+    for (const texture of [colorMap, bumpMap, roughnessMap]) {
+      texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+      texture.anisotropy = Math.min(
+        8, renderer.capabilities.getMaxAnisotropy()
+      );
+    }
+
+    return { colorMap, bumpMap, roughnessMap };
+  }
+
+  const asphalt = mat(0x303944, 0.94);
+  const asphaltMaps = createProceduralSurfaceMaps("asphalt");
+  asphalt.map = asphaltMaps.colorMap;
+  asphalt.bumpMap = asphaltMaps.bumpMap;
+  asphalt.roughnessMap = asphaltMaps.roughnessMap;
+  asphalt.bumpScale = 0.035;
+  asphalt.needsUpdate = true;
+  const sidewalk = mat(0x858b8d, 0.95);
+  const sidewalkMaps = createProceduralSurfaceMaps("concrete");
+  sidewalk.map = sidewalkMaps.colorMap;
+  sidewalk.bumpMap = sidewalkMaps.bumpMap;
+  sidewalk.roughnessMap = sidewalkMaps.roughnessMap;
+  sidewalk.bumpScale = 0.018;
+  sidewalk.needsUpdate = true;
   const concrete = mat(0xb7b6ad);
   const whiteLine = mat(0xe2d9bb);
   const red = mat(0xb83f36, 0.6);
@@ -193,6 +340,7 @@ try {
   const terrainSize = 1000;
   const terrainSegments = 160;
   const terrainPositions = [];
+  const terrainUvs = [];
   const terrainIndices = [];
 
   for (let iz = 0; iz <= terrainSegments; iz++) {
@@ -201,6 +349,10 @@ try {
     for (let ix = 0; ix <= terrainSegments; ix++) {
       const x = -terrainSize / 2 + terrainSize * ix / terrainSegments;
       terrainPositions.push(x, hill(x, z) - 0.28, z);
+      terrainUvs.push(
+        (x + terrainSize / 2) / 12,
+        (z + terrainSize / 2) / 12
+      );
     }
   }
 
@@ -219,13 +371,21 @@ try {
     "position",
     new THREE.Float32BufferAttribute(terrainPositions, 3)
   );
+  terrainGeometry.setAttribute(
+    "uv",
+    new THREE.Float32BufferAttribute(terrainUvs, 2)
+  );
   terrainGeometry.setIndex(terrainIndices);
   terrainGeometry.computeVertexNormals();
 
-  const terrain = new THREE.Mesh(
-    terrainGeometry,
-    mat(0x777b73, 0.96)
-  );
+  const terrainMaterial = mat(0x777b73, 0.96);
+  const terrainMaps = createProceduralSurfaceMaps("terrain");
+  terrainMaterial.map = terrainMaps.colorMap;
+  terrainMaterial.bumpMap = terrainMaps.bumpMap;
+  terrainMaterial.roughnessMap = terrainMaps.roughnessMap;
+  terrainMaterial.bumpScale = 0.012;
+  terrainMaterial.needsUpdate = true;
+  const terrain = new THREE.Mesh(terrainGeometry, terrainMaterial);
   terrain.receiveShadow = true;
   scene.add(terrain);
 
@@ -233,6 +393,7 @@ try {
   function makeRibbon(width, length, axis, center, material, yOffset) {
     const segments = Math.ceil(length / 4);
     const positions = [];
+    const uvs = [];
     const indices = [];
 
     for (let i = 0; i <= segments; i++) {
@@ -250,6 +411,7 @@ try {
         }
 
         positions.push(x, hill(x, z) + yOffset, z);
+        uvs.push((side + 1) * width / 16, (along + length / 2) / 6);
       }
     }
 
@@ -270,6 +432,10 @@ try {
     geometry.setAttribute(
       "position",
       new THREE.Float32BufferAttribute(positions, 3)
+    );
+    geometry.setAttribute(
+      "uv",
+      new THREE.Float32BufferAttribute(uvs, 2)
     );
     geometry.setIndex(indices);
     geometry.computeVertexNormals();
@@ -349,7 +515,7 @@ try {
     map.colorSpace = THREE.SRGBColorSpace;
     map.wrapS = map.wrapT = THREE.RepeatWrapping;
     map.repeat.set(2, 3);
-    map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    map.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
 
     const bumpMap = new THREE.CanvasTexture(canvas);
     bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
@@ -383,7 +549,7 @@ try {
     }
     texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
     texture.repeat.set(2, 3);
-    texture.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
     return texture;
   }
 
@@ -492,36 +658,51 @@ try {
   }
 
   function addFramedCityWindow(x, y, z, width, height, face, materialIndex) {
-    const frame = 0.065;
-    const sill = 0.085;
-    let px = x, pz = z, pw = width, pd = 0.045;
+    // Deeper, more substantial surrounds and projecting stone sills.
+    const frame = 0.085;
+    const sill = 0.12;
+    const frameDepth = 0.10;
+    let px = x, pz = z, pw = width, pd = 0.055;
 
     if (face === "front" || face === "back") {
       const direction = face === "front" ? 1 : -1;
-      pz += direction * 0.035;
+      pz += direction * 0.045;
 
       addCityDetail(x, y + height / 2 + frame / 2, pz,
-        width + frame * 2, frame, 0.075, 0);
+        width + frame * 2, frame, frameDepth, 0);
       addCityDetail(x, y - height / 2 - sill / 2, pz,
-        width + frame * 2.5, sill, 0.13, 0);
+        width + frame * 2.5, sill, frameDepth * 1.35, 2);
       addCityDetail(x - width / 2 - frame / 2, y, pz,
-        frame, height, 0.075, 0);
+        frame, height, frameDepth, 0);
       addCityDetail(x + width / 2 + frame / 2, y, pz,
-        frame, height, 0.075, 0);
+        frame, height, frameDepth, 0);
+
+      // Slim metal mullions divide the glass into believable window panes.
+      const detailZ = pz + direction * (frameDepth * 0.40);
+      addCityDetail(x, y, detailZ,
+        0.035, Math.max(0.12, height - frame * 1.8), 0.035, 4);
+      addCityDetail(x, y, detailZ,
+        Math.max(0.12, width - frame * 1.5), 0.035, 0.035, 4);
     } else {
       const direction = face === "right" ? 1 : -1;
-      px += direction * 0.035;
-      pw = 0.045;
+      px += direction * 0.045;
+      pw = 0.055;
       pd = width;
 
       addCityDetail(px, y + height / 2 + frame / 2, z,
-        0.075, frame, width + frame * 2, 0);
+        frameDepth, frame, width + frame * 2, 0);
       addCityDetail(px, y - height / 2 - sill / 2, z,
-        0.13, sill, width + frame * 2.5, 0);
+        frameDepth * 1.35, sill, width + frame * 2.5, 2);
       addCityDetail(px, y, z - width / 2 - frame / 2,
-        0.075, height, frame, 0);
+        frameDepth, height, frame, 0);
       addCityDetail(px, y, z + width / 2 + frame / 2,
-        0.075, height, frame, 0);
+        frameDepth, height, frame, 0);
+
+      const detailX = px + direction * (frameDepth * 0.40);
+      addCityDetail(detailX, y, z,
+        0.035, Math.max(0.12, height - frame * 1.8), 0.035, 4);
+      addCityDetail(detailX, y, z,
+        0.035, 0.035, Math.max(0.12, width - frame * 1.5), 4);
     }
 
     addCityWindow(px, y, pz, pw, height, pd, materialIndex);
@@ -603,36 +784,57 @@ try {
   // A real triangular-prism gable roof, not a flat box placed on top.
   function addGableRoof(x, z, w, d, roofBaseY, rise, material) {
     const vertices = [];
+    const uvs = [];
 
-    function triangle(a, b, c) {
+    function triangle(a, b, c, uvA, uvB, uvC) {
       vertices.push(
         a[0], a[1], a[2],
         b[0], b[1], b[2],
         c[0], c[1], c[2]
       );
+      uvs.push(
+        uvA[0], uvA[1],
+        uvB[0], uvB[1],
+        uvC[0], uvC[1]
+      );
     }
 
-    const lf = [-w / 2, 0,  d / 2];
-    const rf = [ w / 2, 0,  d / 2];
+    const halfW = Math.max(w / 2, 0.0001);
+    const safeW = Math.max(w, 0.0001);
+    const safeD = Math.max(d, 0.0001);
+    const safeRise = Math.max(rise, 0.0001);
+
+    function gableUV(p) {
+      return [(p[0] + w / 2) / safeW, p[1] / safeRise];
+    }
+
+    function leftSlopeUV(p) {
+      return [(p[2] + d / 2) / safeD, (p[0] + w / 2) / halfW];
+    }
+
+    function rightSlopeUV(p) {
+      return [(p[2] + d / 2) / safeD, (w / 2 - p[0]) / halfW];
+    }
+
+    const lf = [-w / 2, 0, d / 2];
+    const rf = [ w / 2, 0, d / 2];
     const lb = [-w / 2, 0, -d / 2];
     const rb = [ w / 2, 0, -d / 2];
-    const tf = [0, rise,  d / 2];
+    const tf = [0, rise, d / 2];
     const tb = [0, rise, -d / 2];
 
-    triangle(lf, rf, tf);
-    triangle(rb, lb, tb);
+    triangle(lf, rf, tf, gableUV(lf), gableUV(rf), gableUV(tf));
+    triangle(rb, lb, tb, gableUV(rb), gableUV(lb), gableUV(tb));
 
-    triangle(lb, lf, tf);
-    triangle(lb, tf, tb);
+    triangle(lb, lf, tf, leftSlopeUV(lb), leftSlopeUV(lf), leftSlopeUV(tf));
+    triangle(lb, tf, tb, leftSlopeUV(lb), leftSlopeUV(tf), leftSlopeUV(tb));
 
-    triangle(rf, rb, tb);
-    triangle(rf, tb, tf);
+    triangle(rf, rb, tb, rightSlopeUV(rf), rightSlopeUV(rb), rightSlopeUV(tb));
+    triangle(rf, tb, tf, rightSlopeUV(rf), rightSlopeUV(tb), rightSlopeUV(tf));
 
     const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute(
-      "position",
-      new THREE.Float32BufferAttribute(vertices, 3)
-    );
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
     geometry.computeVertexNormals();
 
     const roof = new THREE.Mesh(geometry, material);
@@ -866,6 +1068,22 @@ try {
       doorX, baseY + 0.05, frontZ + 0.67, false
     );
 
+    // Continuous masonry plinth gives the existing house a grounded base.
+    const plinthY = baseY + 0.42;
+    const plinthFrontZ = z + d / 2 + 0.065;
+    const plinthBackZ = z - d / 2 - 0.065;
+    const plinthLeftX = x - w / 2 - 0.065;
+    const plinthRightX = x + w / 2 + 0.065;
+
+    addCityDetail(x, plinthY, plinthFrontZ,
+      w * 0.94, 0.34, 0.13, 2);
+    addCityDetail(x, plinthY, plinthBackZ,
+      w * 0.94, 0.34, 0.13, 2);
+    addCityDetail(plinthLeftX, plinthY, z,
+      0.13, 0.34, d * 0.94, 2);
+    addCityDetail(plinthRightX, plinthY, z,
+      0.13, 0.34, d * 0.94, 2);
+
     // Decorative facade bands and corner trim.
     for (const side of [-1, 1]) {
       addCityDetail(
@@ -879,6 +1097,98 @@ try {
       x, baseY + wallHeight - 0.18, frontZ,
       w * 0.96, 0.12, 0.14, 0
     );
+  }
+
+  // PROCEDURAL ROOF ART: reusable shingle color and relief textures.
+  // Applied to existing roof materials; creates no new buildings or meshes.
+  function createRoofShingleMaps(baseColor) {
+    const size = 512;
+    const tileCanvas = document.createElement("canvas");
+    tileCanvas.width = tileCanvas.height = size;
+    const ctx = tileCanvas.getContext("2d");
+
+    ctx.fillStyle = "#e8e8e8";
+    ctx.fillRect(0, 0, size, size);
+
+    for (let row = 0; row < 16; row++) {
+      const y = row * 32;
+      const offset = row % 2 ? 16 : 0;
+
+      for (let col = -1; col < 17; col++) {
+        const x = col * 32 + offset;
+        const shade = ((row * 17 + col * 29) % 9) - 4;
+        ctx.fillStyle = shade >= 0
+          ? `rgba(255,239,222,${0.012 + shade * 0.002})`
+          : `rgba(18,15,14,${0.012 + Math.abs(shade) * 0.002})`;
+        ctx.fillRect(x + 1, y + 1, 30, 29);
+      }
+    }
+
+    ctx.lineWidth = 1.5;
+    for (let row = 0; row <= 16; row++) {
+      const y = row * 32;
+      ctx.strokeStyle = "rgba(15,13,12,0.48)";
+      ctx.beginPath();
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(size, y + 0.5);
+      ctx.stroke();
+
+      if (row < 16) {
+        const offset = row % 2 ? 16 : 0;
+        for (let col = -1; col < 17; col++) {
+          const x = col * 32 + offset;
+          ctx.strokeStyle = "rgba(18,15,14,0.30)";
+          ctx.beginPath();
+          ctx.moveTo(x + 0.5, y + 3);
+          ctx.lineTo(x + 0.5, y + 29);
+          ctx.stroke();
+        }
+      }
+    }
+
+    const bumpCanvas = document.createElement("canvas");
+    bumpCanvas.width = bumpCanvas.height = size;
+    const bump = bumpCanvas.getContext("2d");
+    bump.fillStyle = "#999999";
+    bump.fillRect(0, 0, size, size);
+
+    for (let row = 0; row < 16; row++) {
+      const y = row * 32;
+      const offset = row % 2 ? 16 : 0;
+      bump.fillStyle = "#454545";
+      bump.fillRect(0, y, size, 2);
+
+      for (let col = -1; col < 17; col++) {
+        const x = col * 32 + offset;
+        bump.fillStyle = "#686868";
+        bump.fillRect(x, y + 2, 1.5, 28);
+        bump.fillStyle = "#a5a5a5";
+        bump.fillRect(x + 2, y + 3, 27, 1);
+      }
+    }
+
+    const colorMap = new THREE.CanvasTexture(tileCanvas);
+    colorMap.colorSpace = THREE.SRGBColorSpace;
+    colorMap.wrapS = colorMap.wrapT = THREE.RepeatWrapping;
+    colorMap.repeat.set(2, 2);
+    colorMap.anisotropy = Math.min(
+      8, renderer.capabilities.getMaxAnisotropy()
+    );
+
+    const bumpMap = new THREE.CanvasTexture(bumpCanvas);
+    bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
+    bumpMap.repeat.copy(colorMap.repeat);
+    bumpMap.anisotropy = colorMap.anisotropy;
+
+    return { colorMap, bumpMap };
+  }
+
+  for (const roofMaterial of suburbanRoofMaterials) {
+    const maps = createRoofShingleMaps(roofMaterial.color);
+    roofMaterial.map = maps.colorMap;
+    roofMaterial.bumpMap = maps.bumpMap;
+    roofMaterial.bumpScale = 0.028;
+    roofMaterial.needsUpdate = true;
   }
 
   const heroHousePlacements = [];
@@ -1434,7 +1744,7 @@ try {
     camera.aspect=innerWidth/innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(innerWidth,innerHeight);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25));
+    renderer.setPixelRatio(renderPixelRatio());
   });
 
   window.ourSearchWorld = {
