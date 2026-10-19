@@ -314,8 +314,63 @@ try {
   ];
 
   // Shared materials keep the city rendering more efficiently.
+    // Subtle, fine-grained stucco surface for California-style facades.
+  // Shared textures keep GPU memory and draw calls under control.
+  const facadeSurfaceTexture = (() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext("2d");
+    const pixels = ctx.createImageData(256, 256);
+
+    for (let i = 0; i < pixels.data.length; i += 4) {
+      const shade = 229 + Math.floor(Math.random() * 27);
+      pixels.data[i] = shade;
+      pixels.data[i + 1] = shade;
+      pixels.data[i + 2] = shade;
+      pixels.data[i + 3] = 255;
+    }
+    ctx.putImageData(pixels, 0, 0);
+
+    // Broad, very subtle plaster variation prevents a perfectly flat finish.
+    for (let i = 0; i < 220; i++) {
+      const shade = Math.random() < 0.5 ? 125 : 255;
+      ctx.fillStyle = `rgba(${shade},${shade},${shade},0.045)`;
+      ctx.beginPath();
+      ctx.ellipse(
+        Math.random() * 256, Math.random() * 256,
+        2 + Math.random() * 10, 1 + Math.random() * 5,
+        Math.random() * Math.PI, 0, Math.PI * 2
+      );
+      ctx.fill();
+    }
+
+    const map = new THREE.CanvasTexture(canvas);
+    map.colorSpace = THREE.SRGBColorSpace;
+    map.wrapS = map.wrapT = THREE.RepeatWrapping;
+    map.repeat.set(2, 3);
+    map.anisotropy = Math.min(4, renderer.capabilities.getMaxAnisotropy());
+
+    const bumpMap = new THREE.CanvasTexture(canvas);
+    bumpMap.wrapS = bumpMap.wrapT = THREE.RepeatWrapping;
+    bumpMap.repeat.copy(map.repeat);
+    bumpMap.anisotropy = map.anisotropy;
+
+    return { map, bumpMap };
+  })();
+
   const facadeMaterials = new Map(
-    facadeColors.map(color => [color, mat(color, 0.76, 0.04)])
+    facadeColors.map(color => [
+      color,
+      new THREE.MeshStandardMaterial({
+        color,
+        map: facadeSurfaceTexture.map,
+        bumpMap: facadeSurfaceTexture.bumpMap,
+        bumpScale: 0.012,
+        roughness: 0.92,
+        metalness: 0.0
+      })
+    ])
   );
   const roofMaterial = mat(0x343e49, 0.88);
   const rooftopMaterial = mat(0x505962, 0.82);
