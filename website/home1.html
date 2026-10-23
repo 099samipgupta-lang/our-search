@@ -473,6 +473,140 @@
       .ai-art { min-height: 290px; }
       .art-symbol { font-size: 92px; }
     }
+
+    /* OUR SEARCH Stories */
+    .stories-section {
+      margin: 8px 0 20px;
+      padding: 14px 0 16px;
+      border-bottom: 1px solid rgba(150,180,220,.13);
+    }
+    .stories-row {
+      display: flex;
+      gap: 17px;
+      overflow-x: auto;
+      padding: 4px 4px 10px;
+      scrollbar-width: none;
+    }
+    .stories-row::-webkit-scrollbar { display: none; }
+    .story-item {
+      flex: 0 0 66px;
+      width: 66px;
+      border: 0;
+      padding: 0;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      text-align: center;
+    }
+    .story-ring {
+      width: 64px;
+      height: 64px;
+      display: grid;
+      place-items: center;
+      padding: 3px;
+      margin: 0 auto 6px;
+      border-radius: 50%;
+      background: linear-gradient(135deg,#ffb347,#ff3868,#a43cff);
+    }
+    .story-avatar {
+      width: 100%;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      border: 2px solid #101725;
+      border-radius: 50%;
+      background: #172940;
+      font-size: 25px;
+    }
+    .story-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .story-label {
+      display: block;
+      overflow: hidden;
+      color: #dce7f6;
+      font-size: 11px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .story-add {
+      position: relative;
+    }
+    .story-add::after {
+      content: "+";
+      position: absolute;
+      right: -1px;
+      bottom: 1px;
+      width: 22px;
+      height: 22px;
+      display: grid;
+      place-items: center;
+      border: 2px solid #101725;
+      border-radius: 50%;
+      background: #159bea;
+      color: white;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .story-viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+      background: rgba(0,0,0,.96);
+    }
+    .story-viewer.open { display: flex; }
+    .story-stage {
+      position: relative;
+      width: min(100%, 430px);
+      height: min(88dvh, 760px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-radius: 16px;
+      background: #080b11;
+    }
+    .story-stage img, .story-stage video {
+      max-width: 100%;
+      max-height: 100%;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+    .story-viewer-button {
+      position: absolute;
+      z-index: 2;
+      border: 1px solid rgba(255,255,255,.25);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      background: rgba(10,15,25,.72);
+      color: white;
+      font-size: 22px;
+      cursor: pointer;
+    }
+    #storyClose { top: 12px; right: 12px; }
+    #storyPrevious { left: 10px; top: 50%; }
+    #storyNext { right: 10px; top: 50%; }
+    #storyPosition {
+      position: absolute;
+      top: 20px;
+      left: 16px;
+      z-index: 2;
+      color: white;
+      font-size: 12px;
+      text-shadow: 0 1px 5px #000;
+    }
+    #storyUpload { display: none; }
+
   </style>
 </head>
 <body>
@@ -492,13 +626,35 @@
     </section>
 
 
+
+    <section class="stories-section" aria-label="Stories">
+      <div class="stories-row" id="storiesRow">
+        <button class="story-item" id="addStoryButton" type="button" aria-label="Add a photo or video to your story">
+          <span class="story-ring story-add">
+            <span class="story-avatar">👤</span>
+          </span>
+          <span class="story-label">Your story</span>
+        </button>
+      </div>
+      <input id="storyUpload" type="file" accept="image/*,video/*" multiple>
+    </section>
+
+    <div class="story-viewer" id="storyViewer" role="dialog" aria-modal="true" aria-label="Story viewer">
+      <div class="story-stage" id="storyStage">
+        <span id="storyPosition"></span>
+        <button class="story-viewer-button" id="storyClose" type="button" aria-label="Close story">×</button>
+        <button class="story-viewer-button" id="storyPrevious" type="button" aria-label="Previous story">‹</button>
+        <button class="story-viewer-button" id="storyNext" type="button" aria-label="Next story">›</button>
+      </div>
+    </div>
+
     <section class="ai-feed" id="aiFeed" aria-label="Discover AI feed">
     </section>
 
     <div class="empty-state" id="emptyState">
       <div style="font-size:30px">⌕</div>
-      <strong>No matching AI experiences yet.</strong><br>
-      Try another search or category.
+      <strong>No AI experiences yet.</strong><br>
+      Discoverable AI experiences can appear here when they are added.
     </div>
   </main>
 
@@ -526,70 +682,35 @@
   <script>
     (() => {
       const cards = [...document.querySelectorAll('.ai-card')];
-      const categories = [...document.querySelectorAll('.category')];
-      const tabs = [...document.querySelectorAll('.feed-tab')];
       const feed = document.getElementById('aiFeed');
       const empty = document.getElementById('emptyState');
-      const backdrop = document.getElementById('aiDialogBackdrop');
-      let activeCategory = 'All';
-      let activeSort = 'featured';
+      const savedToggle = document.getElementById('savedToggle');
       let savedOnly = false;
 
       function updateFeed() {
-        const query = search.value.trim().toLowerCase();
         let visibleCount = 0;
-
         cards.forEach(card => {
-          const matchesQuery = card.dataset.name.includes(query);
-          const matchesCategory = activeCategory === 'All' || card.dataset.category === activeCategory;
-          const matchesSaved = !savedOnly || card.dataset.saved === 'true';
-          const show = matchesQuery && matchesCategory && matchesSaved;
+          const show = !savedOnly || card.dataset.saved === 'true';
           card.hidden = !show;
           if (show) visibleCount++;
         });
-
-        const visibleCards = cards.filter(card => !card.hidden);
-        visibleCards.sort((a, b) => {
-          if (activeSort === 'popular') return Number(b.dataset.popular) - Number(a.dataset.popular);
-          if (activeSort === 'new') return Number(a.dataset.new) - Number(b.dataset.new);
-          return cards.indexOf(a) - cards.indexOf(b);
-        });
-        visibleCards.forEach(card => feed.appendChild(card));
-        empty.style.display = visibleCount ? 'none' : 'block';
+        if (feed) cards.filter(card => !card.hidden).forEach(card => feed.appendChild(card));
+        if (empty) empty.style.display = visibleCount ? 'none' : 'block';
       }
 
-      categories.forEach(button => {
-        button.addEventListener('click', () => {
-          activeCategory = button.dataset.category;
-          categories.forEach(item => item.classList.toggle('active', item === button));
+      if (savedToggle) {
+        savedToggle.addEventListener('click', event => {
+          savedOnly = !savedOnly;
+          event.currentTarget.textContent = savedOnly ? '♥' : '♡';
+          event.currentTarget.setAttribute('aria-label', savedOnly ? 'Show all AI' : 'Show saved AI');
           updateFeed();
         });
-      });
-
-      tabs.forEach(button => {
-        button.addEventListener('click', () => {
-          activeSort = button.dataset.sort;
-          tabs.forEach(item => item.classList.toggle('active', item === button));
-          updateFeed();
-        });
-      });
-
-      search.addEventListener('input', updateFeed);
-      document.getElementById('topSearch').addEventListener('click', () => {
-        search.focus();
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      });
-
-      document.getElementById('savedToggle').addEventListener('click', event => {
-        savedOnly = !savedOnly;
-        event.currentTarget.textContent = savedOnly ? '♥' : '♡';
-        event.currentTarget.setAttribute('aria-label', savedOnly ? 'Show all AI' : 'Show saved AI');
-        updateFeed();
-      });
+      }
 
       document.querySelectorAll('.save-button').forEach(button => {
         button.addEventListener('click', () => {
           const card = button.closest('.ai-card');
+          if (!card) return;
           const isSaved = card.dataset.saved === 'true';
           card.dataset.saved = String(!isSaved);
           button.classList.toggle('saved', !isSaved);
@@ -598,26 +719,116 @@
         });
       });
 
-      document.querySelectorAll('.explore-button').forEach(button => {
-        button.addEventListener('click', () => {
-          document.getElementById('dialogTitle').textContent = button.dataset.title;
-          document.getElementById('dialogDescription').textContent = button.dataset.description;
-          backdrop.classList.add('open');
-          document.getElementById('dialogClose').focus();
-        });
-      });
+      const upload = document.getElementById('storyUpload');
+      const addButton = document.getElementById('addStoryButton');
+      const row = document.getElementById('storiesRow');
+      const viewer = document.getElementById('storyViewer');
+      const stage = document.getElementById('storyStage');
+      const position = document.getElementById('storyPosition');
+      const previous = document.getElementById('storyPrevious');
+      const next = document.getElementById('storyNext');
+      const close = document.getElementById('storyClose');
+      const stories = [];
+      let currentStory = 0;
+      let currentMedia = null;
 
-      function closeDialog() {
-        backdrop.classList.remove('open');
+      function renderStories() {
+        row.querySelectorAll('[data-story-index]').forEach(el => el.remove());
+        stories.forEach((story, index) => {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'story-item';
+          button.dataset.storyIndex = String(index);
+          button.setAttribute('aria-label', 'View your story ' + (index + 1));
+
+          const ring = document.createElement('span');
+          ring.className = 'story-ring';
+          const avatar = document.createElement('span');
+          avatar.className = 'story-avatar';
+
+          if (story.file.type.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = story.url;
+            img.alt = '';
+            avatar.appendChild(img);
+          } else {
+            avatar.textContent = '▶';
+          }
+
+          const label = document.createElement('span');
+          label.className = 'story-label';
+          label.textContent = index === 0 ? 'Your story' : 'Your story ' + (index + 1);
+
+          ring.appendChild(avatar);
+          button.append(ring, label);
+          button.addEventListener('click', () => openStory(index));
+          row.appendChild(button);
+        });
       }
 
-      document.getElementById('dialogClose').addEventListener('click', closeDialog);
-      backdrop.addEventListener('click', event => {
-        if (event.target === backdrop) closeDialog();
+      function openStory(index) {
+        if (!stories.length) return;
+        currentStory = Math.max(0, Math.min(index, stories.length - 1));
+        viewer.classList.add('open');
+        document.body.style.overflow = 'hidden';
+        showStory();
+        close.focus();
+      }
+
+      function showStory() {
+        if (currentMedia) currentMedia.remove();
+
+        const story = stories[currentStory];
+        const media = document.createElement(story.file.type.startsWith('video/') ? 'video' : 'img');
+        media.src = story.url;
+        media.setAttribute('aria-label', 'Your uploaded story');
+        if (media.tagName === 'VIDEO') {
+          media.controls = true;
+          media.playsInline = true;
+        } else {
+          media.alt = 'Your uploaded story';
+        }
+
+        currentMedia = media;
+        stage.appendChild(media);
+        position.textContent = (currentStory + 1) + ' / ' + stories.length;
+        previous.style.display = currentStory > 0 ? 'block' : 'none';
+        next.style.display = currentStory < stories.length - 1 ? 'block' : 'none';
+      }
+
+      function closeViewer() {
+        if (currentMedia && currentMedia.tagName === 'VIDEO') currentMedia.pause();
+        viewer.classList.remove('open');
+        document.body.style.overflow = '';
+      }
+
+      addButton.addEventListener('click', () => upload.click());
+
+      upload.addEventListener('change', () => {
+        const files = [...upload.files].filter(file =>
+          file.type.startsWith('image/') || file.type.startsWith('video/')
+        );
+        files.forEach(file => stories.push({ file, url: URL.createObjectURL(file) }));
+        upload.value = '';
+        if (files.length) {
+          renderStories();
+          openStory(stories.length - files.length);
+        }
+      });
+
+      previous.addEventListener('click', () => openStory(currentStory - 1));
+      next.addEventListener('click', () => openStory(currentStory + 1));
+      close.addEventListener('click', closeViewer);
+      viewer.addEventListener('click', event => {
+        if (event.target === viewer) closeViewer();
       });
       document.addEventListener('keydown', event => {
-        if (event.key === 'Escape') closeDialog();
+        if (event.key === 'Escape' && viewer.classList.contains('open')) closeViewer();
+        if (viewer.classList.contains('open') && event.key === 'ArrowRight' && currentStory < stories.length - 1) openStory(currentStory + 1);
+        if (viewer.classList.contains('open') && event.key === 'ArrowLeft' && currentStory > 0) openStory(currentStory - 1);
       });
+
+      updateFeed();
     })();
   </script>
 </body>
