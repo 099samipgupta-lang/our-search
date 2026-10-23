@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#07111f">
+  <title>OUR SEARCH — Discover AI</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    :root {
+      --feed-bg: #07111f;
+      --feed-card: #101d30;
+      --feed-border: rgba(255,255,255,.09);
+      --feed-text: #f4f8ff;
+      --feed-muted: #9eabc0;
+      --feed-blue: #48c7ff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 0 0 88px;
+      min-height: 100vh;
+      background: var(--feed-bg);
+      color: var(--feed-text);
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    button, input { font: inherit; }
+    button { cursor: pointer; }
+
+    .feed-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 15px 18px;
+      background: rgba(7,17,31,.94);
+      border-bottom: 1px solid var(--feed-border);
+      backdrop-filter: blur(18px);
+    }
+
+    .feed-brand {
+      font-size: 21px;
+      font-weight: 850;
+      letter-spacing: -1px;
+    }
+
+    .feed-brand span { color: var(--feed-blue); }
+
+    .feed-header-actions { display: flex; gap: 9px; }
+
+    .round-action {
+      width: 40px;
+      height: 40px;
+      border: 1px solid var(--feed-border);
+      border-radius: 50%;
+      color: white;
+      background: #14243a;
+      font-size: 19px;
+    }
+
+    .feed-container {
+      width: min(100%, 760px);
+      margin: 0 auto;
+    }
+
+    .feed-intro { padding: 25px 18px 12px; }
+
+    .eyebrow {
+      color: var(--feed-blue);
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .feed-intro h1 {
+      margin: 8px 0;
+      font-size: clamp(27px, 6vw, 37px);
+      letter-spacing: -1.5px;
+      line-height: 1.12;
+    }
+
+    .feed-intro p {
+      margin: 0;
+      color: var(--feed-muted);
+      line-height: 1.55;
+      font-size: 14px;
+    }
+
+    .feed-search {
+      display: flex;
+      gap: 10px;
+      margin: 17px 18px;
+      padding: 0 14px;
+      min-height: 49px;
+      align-items: center;
+      border: 1px solid var(--feed-border);
+      border-radius: 15px;
+      background: #101d30;
+    }
+
+    .feed-search span { color: var(--feed-blue); font-size: 19px; }
+
+    .feed-search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: none;
+      color: white;
+      background: transparent;
+      font-size: 14px;
+    }
+
+    .feed-search input::placeholder { color: #8292aa; }
+
+    .section-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 19px 18px 12px;
+    }
+
+    .section-heading h2 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: -.3px;
+    }
+
+    .section-heading span {
+      color: var(--feed-muted);
+      font-size: 12px;
+    }
+
+    .category-list {
+      display: flex;
+      gap: 9px;
+      overflow-x: auto;
+      padding: 0 18px 10px;
+      scrollbar-width: none;
+    }
+
+    .category-list::-webkit-scrollbar { display: none; }
+
+    .category {
+      flex: 0 0 auto;
+      padding: 9px 14px;
+      color: #c1ccdc;
+      border: 1px solid var(--feed-border);
+      border-radius: 22px;
+      background: #101d30;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .category.active {
+      color: #061321;
+      background: var(--feed-blue);
+      border-color: var(--feed-blue);
+    }
+
+    .feed-tabs {
+      display: flex;
+      gap: 24px;
+      padding: 18px;
+      border-bottom: 1px solid var(--feed-border);
+    }
+
+    .feed-tab {
+      padding: 0 0 9px;
+      color: var(--feed-muted);
+      background: none;
+      border: 0;
+      border-bottom: 2px solid transparent;
+      font-size: 13px;
+      font-weight: 750;
+    }
+
+    .feed-tab.active {
+      color: white;
+      border-bottom-color: var(--feed-blue);
+    }
+
+    .ai-feed { padding: 4px 12px; }
+
+    .ai-card {
+      overflow: hidden;
+      margin: 15px 0;
+      border: 1px solid var(--feed-border);
+      border-radius: 21px;
+      background: var(--feed-card);
+    }
+
+    .ai-art {
+      position: relative;
+      display: flex;
+      min-height: 215px;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      isolation: isolate;
+    }
+
+    .ai-art::before, .ai-art::after {
+      position: absolute;
+      z-index: -1;
+      content: "";
+      width: 220px;
+      height: 220px;
+      border: 1px solid rgba(255,255,255,.17);
+      border-radius: 50%;
+    }
+
+    .ai-art::after {
+      width: 160px;
+      height: 160px;
+      border-style: dashed;
+      transform: rotate(35deg);
+    }
+
+    .art-space {
+      background: radial-gradient(ellipse at 50% 50%, #2559a7 0%, #14254c 40%, #10182d 75%);
+    }
+
+    .art-create {
+      background: radial-gradient(ellipse at 75% 25%, #b75af1 0%, #472b86 35%, #17152f 78%);
+    }
+
+    .art-code {
+      background: radial-gradient(ellipse at 35% 55%, #087e80 0%, #124557 40%, #101b31 80%);
+    }
+
+    .art-learn {
+      background: radial-gradient(ellipse at 65% 35%, #c17c35 0%, #68402f 35%, #211c2c 80%);
+    }
+
+    .art-science {
+      background: radial-gradient(ellipse at 50% 40%, #137e91 0%, #164260 40%, #111a30 80%);
+    }
+
+    .art-writing {
+      background: radial-gradient(ellipse at 65% 35%, #a34768 0%, #542b58 40%, #18172e 80%);
+    }
+
+    .art-symbol {
+      font-size: 76px;
+      filter: drop-shadow(0 0 23px rgba(94,218,255,.5));
+      user-select: none;
+    }
+
+    .art-label {
+      position: absolute;
+      top: 13px;
+      left: 13px;
+      padding: 7px 10px;
+      color: #eaf8ff;
+      background: rgba(4,12,26,.55);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 20px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .7px;
+      backdrop-filter: blur(10px);
+    }
+
+    .art-number {
+      position: absolute;
+      right: 13px;
+      bottom: 13px;
+      color: rgba(255,255,255,.8);
+      font-size: 11px;
+    }
+
+    .ai-card-content { padding: 16px; }
+
+    .creator-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .creator-avatar {
+      display: grid;
+      width: 40px;
+      height: 40px;
+      flex: 0 0 40px;
+      place-items: center;
+      border: 1px solid rgba(95,207,255,.3);
+      border-radius: 50%;
+      background: #172f4a;
+      font-size: 20px;
+    }
+
+    .creator-info { flex: 1; min-width: 0; }
+
+    .creator-name { font-size: 13px; font-weight: 800; }
+
+    .creator-type {
+      margin-top: 3px;
+      color: var(--feed-muted);
+      font-size: 11px;
+    }
+
+    .featured-tag {
+      padding: 5px 8px;
+      border: 1px solid rgba(72,199,255,.25);
+      border-radius: 9px;
+      color: var(--feed-blue);
+      font-size: 10px;
+      font-weight: 800;
+    }
+
+    .ai-card h3 {
+      margin: 15px 0 6px;
+      font-size: 21px;
+      letter-spacing: -.5px;
+    }
+
+    .ai-description {
+      margin: 0;
+      color: #b4c0d2;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .ai-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+      margin: 13px 0 16px;
+    }
+
+    .ai-tag {
+      padding: 6px 9px;
+      border-radius: 8px;
+      background: #192940;
+      color: #c4d2e5;
+      font-size: 10px;
+    }
+
+    .ai-card-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding-top: 13px;
+      border-top: 1px solid var(--feed-border);
+    }
+
+    .save-button {
+      padding: 9px 10px;
+      color: #b9c6d9;
+      background: transparent;
+      border: 1px solid var(--feed-border);
+      border-radius: 11px;
+      font-size: 12px;
+    }
+
+    .save-button.saved { color: var(--feed-blue); }
+
+    .explore-button {
+      padding: 11px 16px;
+      color: #061321;
+      background: var(--feed-blue);
+      border: 0;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 850;
+    }
+
+    .empty-state {
+      display: none;
+      padding: 35px 18px;
+      color: var(--feed-muted);
+      text-align: center;
+      line-height: 1.6;
+    }
+
+    .feed-note {
+      margin: 20px 18px;
+      padding: 14px;
+      border: 1px solid var(--feed-border);
+      border-radius: 14px;
+      color: var(--feed-muted);
+      font-size: 11px;
+      line-height: 1.6;
+    }
+
+    .home-switcher {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 100;
+      display: flex;
+      justify-content: center;
+      padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+      background: rgba(7,17,31,.96);
+      border-top: 1px solid var(--feed-border);
+      backdrop-filter: blur(18px);
+    }
+
+    .home-switcher a {
+      display: flex;
+      flex: 1;
+      max-width: 220px;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 5px;
+      color: var(--feed-muted);
+      text-decoration: none;
+      font-size: 12px;
+      font-weight: 650;
+    }
+
+    .home-switcher .home-nav-icon { font-size: 23px; line-height: 1.2; }
+    .home-switcher a.active { color: var(--feed-blue); }
+
+    .dialog-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(0,0,0,.75);
+    }
+
+    .dialog-backdrop.open { display: flex; }
+
+    .ai-dialog {
+      width: min(100%, 420px);
+      padding: 22px;
+      border: 1px solid var(--feed-border);
+      border-radius: 20px;
+      background: #101d30;
+    }
+
+    .ai-dialog h2 { margin: 0 0 9px; font-size: 23px; }
+    .ai-dialog p { color: #b4c0d2; font-size: 14px; line-height: 1.6; }
+
+    .dialog-close {
+      float: right;
+      width: 35px;
+      height: 35px;
+      color: white;
+      background: #20324a;
+      border: 0;
+      border-radius: 50%;
+    }
+
+    .dialog-status {
+      margin-top: 17px;
+      padding: 12px;
+      border-radius: 12px;
+      background: #172940;
+      color: #c2d2e5;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    @media (min-width: 700px) {
+      .ai-feed { padding: 4px 18px; }
+      .ai-art { min-height: 290px; }
+      .art-symbol { font-size: 92px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="feed-header">
+    <div class="feed-brand">OUR <span>SEARCH</span></div>
+    <div class="feed-header-actions">
+      <button class="round-action" id="topSearch" aria-label="Search AI">⌕</button>
+      <button class="round-action" id="savedToggle" aria-label="Show saved AI">♡</button>
+    </div>
+  </header>
+
+  <main class="feed-container">
+    <section class="feed-intro">
+      <div class="eyebrow">Your AI discovery feed</div>
+      <h1>Discover what AI<br>can do for you.</h1>
+      <p>Explore AI experiences for creativity, learning, coding, science and everyday ideas.</p>
+    </section>
+
+    <label class="feed-search">
+      <span aria-hidden="true">⌕</span>
+      <input id="aiSearch" type="search" placeholder="Discover an AI experience..." aria-label="Search AI experiences">
+    </label>
+
+    <section aria-label="AI categories">
+      <div class="section-heading">
+        <h2>Explore interests</h2>
+        <span>Find your next AI</span>
+      </div>
+      <div class="category-list" id="categoryList">
+        <button class="category active" data-category="All">For you</button>
+        <button class="category" data-category="Creative">Creative</button>
+        <button class="category" data-category="Learning">Learning</button>
+        <button class="category" data-category="Coding">Coding</button>
+        <button class="category" data-category="Science">Science</button>
+        <button class="category" data-category="Writing">Writing</button>
+      </div>
+    </section>
+
+    <div class="feed-tabs" aria-label="Feed sorting">
+      <button class="feed-tab active" data-sort="featured">For You</button>
+      <button class="feed-tab" data-sort="popular">Popular</button>
+      <button class="feed-tab" data-sort="new">New</button>
+    </div>
+
+    <section class="ai-feed" id="aiFeed" aria-label="Discover AI feed">
+      <article class="ai-card" data-name="cosmos explorer space planets astronomy universe" data-category="Science" data-popular="96" data-new="1">
+        <div class="ai-art art-space">
+          <span class="art-label">✦ FEATURED EXPERIENCE</span>
+          <span class="art-symbol" aria-hidden="true">🪐</span>
+          <span class="art-number">01 / EXPLORE</span>
+        </div>
+        <div class="ai-card-content">
+          <div class="creator-row">
+            <div class="creator-avatar">🌌</div>
+            <div class="creator-info">
+              <div class="creator-name">Cosmos Explorer</div>
+              <div class="creator-type">Science · Space discovery</div>
+            </div>
+            <span class="featured-tag">FEATURED</span>
+          </div>
+          <h3>Explore the universe</h3>
+          <p class="ai-description">Discover planets, understand black holes and explore the biggest questions about space.</p>
+          <div class="ai-tags"><span class="ai-tag">Astronomy</span><span class="ai-tag">Planets</span><span class="ai-tag">Curiosity</span></div>
+          <div class="ai-card-actions">
+            <button class="save-button" aria-label="Save Cosmos Explorer">♡ Save</button>
+            <button class="explore-button" data-title="Cosmos Explorer" data-description="Explore space, planets, stars and astronomy concepts through an interactive AI experience.">Explore AI ↗</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="ai-card" data-name="creative studio art design imagination images" data-category="Creative" data-popular="99" data-new="2">
+        <div class="ai-art art-create">
+          <span class="art-label">CREATIVE PLAYGROUND</span>
+          <span class="art-symbol" aria-hidden="true">🎨</span>
+          <span class="art-number">02 / CREATE</span>
+        </div>
+        <div class="ai-card-content">
+          <div class="creator-row">
+            <div class="creator-avatar">✨</div>
+            <div class="creator-info">
+              <div class="creator-name">Creative Studio</div>
+              <div class="creator-type">Creative · Ideas and design</div>
+            </div>
+          </div>
+          <h3>Turn imagination into ideas</h3>
+          <p class="ai-description">Explore design concepts, brainstorm creative projects and develop your next big idea.</p>
+          <div class="ai-tags"><span class="ai-tag">Design</span><span class="ai-tag">Brainstorming</span><span class="ai-tag">Art</span></div>
+          <div class="ai-card-actions">
+            <button class="save-button" aria-label="Save Creative Studio">♡ Save</button>
+            <button class="explore-button" data-title="Creative Studio" data-description="Discover creative workflows for brainstorming, design planning and developing original ideas.">Explore AI ↗</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="ai-card" data-name="code companion programming javascript python software developer" data-category="Coding" data-popular="94" data-new="3">
+        <div class="ai-art art-code">
+          <span class="art-label">BUILD SOMETHING</span>
+          <span class="art-symbol" aria-hidden="true">⌘</span>
+          <span class="art-number">03 / BUILD</span>
+        </div>
+        <div class="ai-card-content">
+          <div class="creator-row">
+            <div class="creator-avatar">💻</div>
+            <div class="creator-info">
+              <div class="creator-name">Code Companion</div>
+              <div class="creator-type">Coding · Developer tools</div>
+            </div>
+          </div>
+          <h3>Bring your code to life</h3>
+          <p class="ai-description">Explore programming concepts, plan software projects and learn how code works.</p>
+          <div class="ai-tags"><span class="ai-tag">JavaScript</span><span class="ai-tag">Python</span><span class="ai-tag">Projects</span></div>
+          <div class="ai-card-actions">
+            <button class="save-button" aria-label="Save Code Companion">♡ Save</button>
+            <button class="explore-button" data-title="Code Companion" data-description="Explore coding concepts, software architecture and programming project ideas.">Explore AI ↗</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="ai-card" data-name="study guide learning education explain concepts mathematics" data-category="Learning" data-popular="91" data-new="4">
+        <div class="ai-art art-learn">
+          <span class="art-label">LEARN SOMETHING NEW</span>
+          <span class="art-symbol" aria-hidden="true">📚</span>
+          <span class="art-number">04 / LEARN</span>
+        </div>
+        <div class="ai-card-content">
+          <div class="creator-row">
+            <div class="creator-avatar">💡</div>
+            <div class="creator-info">
+              <div class="creator-name">Study Guide</div>
+              <div class="creator-type">Learning · Knowledge explorer</div>
+            </div>
+          </div>
+          <h3>Make difficult ideas clearer</h3>
+          <p class="ai-description">Discover explanations, explore new subjects and find different ways to understand a concept.</p>
+          <div class="ai-tags"><span class="ai-tag">Learning</span><span class="ai-tag">Mathematics</span><span class="ai-tag">Explainers</span></div>
+          <div class="ai-card-actions">
+            <button class="save-button" aria-label="Save Study Guide">♡ Save</button>
+            <button class="explore-button" data-title="Study Guide" data-description="Explore learning experiences for understanding subjects, concepts and new skills.">Explore AI ↗</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="ai-card" data-name="science lab biology chemistry physics experiments" data-category="Science" data-popular="88" data-new="5">
+        <div class="ai-art art-science">
+          <span class="art-label">CURIOSITY LAB</span>
+          <span class="art-symbol" aria-hidden="true">⚛️</span>
+          <span class="art-number">05 / DISCOVER</span>
+        </div>
+        <div class="ai-card-content">
+          <div class="creator-row">
+            <div class="creator-avatar">🔬</div>
+            <div class="creator-info">
+              <div class="creator-name">Science Lab</div>
+              <div class="creator-type">Science · Explore how things work</div>
+            </div>
+          </div>
+          <h3>Ask bigger science questions</h3>
+          <p class="ai-description">Explore physics, chemistry and biology through clear explanations and visual ideas.</p>
+          <div class="ai-tags"><span class="ai-tag">Physics</span><span class="ai-tag">Biology</span><span class="ai-tag">Chemistry</span></div>
+          <div class="ai-card-actions">
+            <button class="save-button" aria-label="Save Science Lab">♡ Save</button>
+            <button class="explore-button" data-title="Science Lab" data-description="Explore science concepts, from physics and chemistry to biology and the natural world.">Explore AI ↗</button>
+          </div>
+        </div>
+      </article>
+
+      <article class="ai-card" data-name="writing partner stories writing communication ideas" data-category="Writing" data-popular="85" data-new="6">
+        <div class="ai-art art-writing">
+          <span class="art-label">FIND YOUR WORDS</span>
+          <span class="art-symbol" aria-hidden="true">✍️</span>
+          <span class="art-number">06 / WRITE</span>
+        </div>
+        <div class="ai-card-content">
+          <div class="creator-row">
+            <div class="creator-avatar">📝</div>
+            <div class="creator-info">
+              <div class="creator-name">Writing Partner</div>
+              <div class="creator-type">Writing · Words and stories</div>
+            </div>
+          </div>
+          <h3>Shape your next story</h3>
+          <p class="ai-description">Explore story ideas, organize your thoughts and develop clearer writing.</p>
+          <div class="ai-tags"><span class="ai-tag">Stories</span><span class="ai-tag">Ideas</span><span class="ai-tag">Writing</span></div>
+          <div class="ai-card-actions">
+            <button class="save-button" aria-label="Save Writing Partner">♡ Save</button>
+            <button class="explore-button" data-title="Writing Partner" data-description="Explore story planning, writing ideas and ways to organize your thoughts.">Explore AI ↗</button>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <div class="empty-state" id="emptyState">
+      <div style="font-size:30px">⌕</div>
+      <strong>No matching AI experiences yet.</strong><br>
+      Try another search or category.
+    </div>
+
+    <p class="feed-note">OUR SEARCH AI Discovery · These are example discovery cards for the first interface. Live AI functionality, real creator profiles and personalized recommendations can be connected in later steps.</p>
+  </main>
+
+  <nav class="home-switcher" aria-label="Home navigation">
+    <a href="/home1.html" class="active" aria-current="page" aria-label="Home 1: Discover AI">
+      <span class="home-nav-icon" aria-hidden="true">✦</span>
+      <span>Home 1</span>
+    </a>
+    <a href="/" aria-label="Home 2: Search Engine">
+      <span class="home-nav-icon" aria-hidden="true">⌕</span>
+      <span>Home 2</span>
+    </a>
+  </nav>
+
+  <div class="dialog-backdrop" id="aiDialogBackdrop" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <div class="ai-dialog">
+      <button class="dialog-close" id="dialogClose" aria-label="Close">✕</button>
+      <div class="eyebrow">AI EXPERIENCE</div>
+      <h2 id="dialogTitle">Explore AI</h2>
+      <p id="dialogDescription"></p>
+      <div class="dialog-status">This is the discovery-feed prototype. Connecting a working AI experience is a separate next step.</div>
+    </div>
+  </div>
+
+  <script>
+    (() => {
+      const cards = [...document.querySelectorAll('.ai-card')];
+      const search = document.getElementById('aiSearch');
+      const categories = [...document.querySelectorAll('.category')];
+      const tabs = [...document.querySelectorAll('.feed-tab')];
+      const feed = document.getElementById('aiFeed');
+      const empty = document.getElementById('emptyState');
+      const backdrop = document.getElementById('aiDialogBackdrop');
+      let activeCategory = 'All';
+      let activeSort = 'featured';
+      let savedOnly = false;
+
+      function updateFeed() {
+        const query = search.value.trim().toLowerCase();
+        let visibleCount = 0;
+
+        cards.forEach(card => {
+          const matchesQuery = card.dataset.name.includes(query);
+          const matchesCategory = activeCategory === 'All' || card.dataset.category === activeCategory;
+          const matchesSaved = !savedOnly || card.dataset.saved === 'true';
+          const show = matchesQuery && matchesCategory && matchesSaved;
+          card.hidden = !show;
+          if (show) visibleCount++;
+        });
+
+        const visibleCards = cards.filter(card => !card.hidden);
+        visibleCards.sort((a, b) => {
+          if (activeSort === 'popular') return Number(b.dataset.popular) - Number(a.dataset.popular);
+          if (activeSort === 'new') return Number(a.dataset.new) - Number(b.dataset.new);
+          return cards.indexOf(a) - cards.indexOf(b);
+        });
+        visibleCards.forEach(card => feed.appendChild(card));
+        empty.style.display = visibleCount ? 'none' : 'block';
+      }
+
+      categories.forEach(button => {
+        button.addEventListener('click', () => {
+          activeCategory = button.dataset.category;
+          categories.forEach(item => item.classList.toggle('active', item === button));
+          updateFeed();
+        });
+      });
+
+      tabs.forEach(button => {
+        button.addEventListener('click', () => {
+          activeSort = button.dataset.sort;
+          tabs.forEach(item => item.classList.toggle('active', item === button));
+          updateFeed();
+        });
+      });
+
+      search.addEventListener('input', updateFeed);
+      document.getElementById('topSearch').addEventListener('click', () => {
+        search.focus();
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+
+      document.getElementById('savedToggle').addEventListener('click', event => {
+        savedOnly = !savedOnly;
+        event.currentTarget.textContent = savedOnly ? '♥' : '♡';
+        event.currentTarget.setAttribute('aria-label', savedOnly ? 'Show all AI' : 'Show saved AI');
+        updateFeed();
+      });
+
+      document.querySelectorAll('.save-button').forEach(button => {
+        button.addEventListener('click', () => {
+          const card = button.closest('.ai-card');
+          const isSaved = card.dataset.saved === 'true';
+          card.dataset.saved = String(!isSaved);
+          button.classList.toggle('saved', !isSaved);
+          button.textContent = !isSaved ? '♥ Saved' : '♡ Save';
+          updateFeed();
+        });
+      });
+
+      document.querySelectorAll('.explore-button').forEach(button => {
+        button.addEventListener('click', () => {
+          document.getElementById('dialogTitle').textContent = button.dataset.title;
+          document.getElementById('dialogDescription').textContent = button.dataset.description;
+          backdrop.classList.add('open');
+          document.getElementById('dialogClose').focus();
+        });
+      });
+
+      function closeDialog() {
+        backdrop.classList.remove('open');
+      }
+
+      document.getElementById('dialogClose').addEventListener('click', closeDialog);
+      backdrop.addEventListener('click', event => {
+        if (event.target === backdrop) closeDialog();
+      });
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeDialog();
+      });
+    })();
+  </script>
+</body>
+</html>
