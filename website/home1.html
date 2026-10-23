@@ -491,10 +491,6 @@
       <p>Explore AI experiences for creativity, learning, coding, science and everyday ideas.</p>
     </section>
 
-    <label class="feed-search">
-      <span aria-hidden="true">⌕</span>
-      <input id="aiSearch" type="search" placeholder="Discover an AI experience..." aria-label="Search AI experiences">
-    </label>
 
     <section class="ai-feed" id="aiFeed" aria-label="Discover AI feed">
     </section>
@@ -530,7 +526,6 @@
   <script>
     (() => {
       const cards = [...document.querySelectorAll('.ai-card')];
-      const search = document.getElementById('aiSearch');
       const categories = [...document.querySelectorAll('.category')];
       const tabs = [...document.querySelectorAll('.feed-tab')];
       const feed = document.getElementById('aiFeed');
