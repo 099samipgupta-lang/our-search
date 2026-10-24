@@ -422,6 +422,22 @@
     }
 
     .home-switcher .home-nav-icon { font-size: 23px; line-height: 1.2; }
+
+    .home-switcher { gap: 2px; }
+    .home-switcher a { min-width: 0; max-width: none; }
+    .home-switcher .create-nav-icon {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 30px;
+      border: 2px solid currentColor;
+      border-radius: 9px;
+      font-size: 27px;
+      line-height: 1;
+      font-weight: 400;
+    }
+    .home-switcher a.create-nav { color: var(--feed-text, #f4f7fb); }
+
     .home-switcher a.active { color: var(--feed-blue); }
 
     .dialog-backdrop {
@@ -658,12 +674,20 @@
     </div>
   </main>
 
-  <nav class="home-switcher" aria-label="Home navigation">
-    <a href="/home1.html" class="active" aria-current="page" aria-label="Home 1: Discover AI">
+  <nav class="home-switcher" aria-label="Main navigation">
+    <a href="/home1.html" class="active" aria-current="page" aria-label="Home 1">
       <span class="home-nav-icon" aria-hidden="true">✦</span>
       <span>Home 1</span>
     </a>
-    <a href="/" aria-label="Home 2: Search Engine">
+    <a href="/home1.html#chat" aria-label="Chat">
+      <span class="home-nav-icon" aria-hidden="true">☏</span>
+      <span>Chat</span>
+    </a>
+    <a href="/home1.html#storiesRow" class="create-nav" aria-label="Create">
+      <span class="create-nav-icon" aria-hidden="true">+</span>
+      <span>Create</span>
+    </a>
+    <a href="/"  aria-label="Home 2">
       <span class="home-nav-icon" aria-hidden="true">⌕</span>
       <span>Home 2</span>
     </a>

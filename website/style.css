@@ -1210,3 +1210,29 @@ body {
         padding-right: 8px;
     }
 }
+
+/* OUR SEARCH: four-item bottom navigation */
+.home-switcher {
+    gap: 2px;
+}
+
+.home-switcher a {
+    min-width: 0;
+    max-width: none;
+}
+
+.home-switcher a.create-nav {
+    color: var(--text, #f4f7fb);
+}
+
+.home-switcher .create-nav-icon {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 30px;
+    border: 2px solid currentColor;
+    border-radius: 9px;
+    font-size: 27px;
+    line-height: 1;
+    font-weight: 400;
+}
