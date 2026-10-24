@@ -60,8 +60,14 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:24px}
        minlength="8" placeholder="At least 8 characters" required>
 
 <div class="actions">
-<button class="primary" id="emailLogin" type="button">Sign in</button>
-<button class="secondary" id="createAccount" type="button">Create account</button>
+<div>
+<button class="primary" id="emailLogin" type="button">Log in</button>
+<p class="hint">If you already have an account</p>
+</div>
+<div>
+<button class="secondary" id="createAccount" type="button">Sign in</button>
+<p class="hint">Create a new account</p>
+</div>
 </div>
 
 <p class="status" id="loginStatus" role="status"></p>
