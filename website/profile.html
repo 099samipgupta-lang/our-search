@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#080b14">
+<title>Profile — OUR SEARCH</title>
+<style>
+:root{color-scheme:dark;--bg:#080b14;--panel:#111725;--line:#273247;--text:#f4f7ff;--muted:#9aa8c0;--cyan:#66e7ff}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at top,#14243b 0%,var(--bg) 55%);color:var(--text);font:16px system-ui,-apple-system,sans-serif;min-height:100vh}
+header{height:66px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 6%;gap:12px}
+.brand{font-weight:850;letter-spacing:1.5px;color:var(--cyan);text-decoration:none}
+header a:last-child{color:var(--muted);text-decoration:none}
+main{width:min(680px,92%);margin:42px auto 110px}
+h1{font-size:clamp(28px,5vw,40px);margin:0 0 8px}
+.subtitle{color:var(--muted);line-height:1.6;margin:0 0 26px}
+.panel{background:rgba(17,23,37,.94);border:1px solid var(--line);border-radius:22px;padding:clamp(20px,5vw,34px);box-shadow:0 18px 60px #0003}
+button,input,textarea{font:inherit}
+button{cursor:pointer;border:0;border-radius:12px;padding:13px 17px;font-weight:700}
+.google{background:#f6f8ff;color:#101522;width:100%;display:flex;justify-content:center;align-items:center;gap:12px}
+.google-mark{font-size:21px;font-weight:900;color:#4285f4}
+.note{color:var(--muted);font-size:13px;line-height:1.6;margin-top:15px}
+.status{margin:16px 0;color:var(--cyan);font-size:14px;line-height:1.5;overflow-wrap:anywhere}
+.hidden{display:none!important}
+.profile-head{display:flex;align-items:center;gap:17px;margin-bottom:25px}
+.avatar{width:84px;height:84px;border-radius:50%;background:#202d42;border:2px solid #5bdef8;object-fit:cover;display:grid;place-items:center;font-size:30px;flex-shrink:0}
+.account-id{font-size:12px;color:var(--muted);overflow-wrap:anywhere;margin-top:5px}
+label{display:block;color:#dbe5f7;font-size:14px;font-weight:650;margin:18px 0 8px}
+input,textarea{width:100%;background:#090f1b;color:var(--text);border:1px solid #34425a;border-radius:11px;padding:13px;outline:none}
+input:focus,textarea:focus{border-color:var(--cyan)}
+textarea{min-height:105px;resize:vertical}
+.hint{font-size:12px;color:var(--muted);margin-top:6px}
+.primary{background:var(--cyan);color:#061019;width:100%;margin-top:22px}
+.secondary{background:#263248;color:var(--text)}
+.actions{display:flex;gap:10px;margin-top:12px}
+.actions button{flex:1}
+footer{text-align:center;color:var(--muted);font-size:12px;margin-top:24px}
+</style>
+</head>
+<body>
+<header>
+<a class="brand" href="/index.html">OUR SEARCH</a>
+<a href="/home1.html">Back to Home</a>
+</header>
+<main>
+<h1>Your profile</h1>
+<p class="subtitle">One account for your identity across OUR SEARCH.</p>
+
+<section class="panel" id="signedOut">
+<h2>Sign in or create your account</h2>
+<p class="subtitle">Continue with Google. Your OUR SEARCH username and profile will be set up after sign-in.</p>
+<button class="google" id="googleLogin" type="button">
+<span class="google-mark">G</span> Continue with Google
+</button>
+<p class="status" id="loginStatus" role="status"></p>
+<p class="note">OUR SEARCH will never ask for your Google password on this page. Google authentication must be configured before sign-in can work.</p>
+</section>
+
+<section class="panel hidden" id="profilePanel">
+<div class="profile-head">
+<img class="avatar hidden" id="avatar" alt="Profile photo">
+<div class="avatar" id="avatarFallback">U</div>
+<div>
+<h2 id="profileHeading">Your account</h2>
+<div id="emailText" class="note"></div>
+<div class="account-id">OUR SEARCH ID: <span id="userId"></span></div>
+</div>
+</div>
+<div class="picture-upload">
+<label for="profilePicture">Profile picture</label>
+<input id="profilePicture" type="file" accept="image/*">
+<button class="secondary" id="uploadPicture" type="button">Upload picture</button>
+<p class="hint">Choose an image from your device, then upload it to your OUR SEARCH profile.</p>
+</div>
+<form id="profileForm">
+<label for="username">Username</label>
+<input id="username" name="username" maxlength="30" pattern="[A-Za-z0-9_]{3,30}" required autocomplete="username" placeholder="your_username">
+<div class="hint">3–30 characters. Letters, numbers and underscores only. Must be unique.</div>
+
+<label for="displayName">Display name</label>
+<input id="displayName" name="displayName" maxlength="60" required placeholder="Your name">
+
+<label for="bio">Bio</label>
+<textarea id="bio" name="bio" maxlength="160" placeholder="Tell people a little about yourself (160 characters max)"></textarea>
+
+<button class="primary" id="saveProfile" type="submit">Save profile</button>
+</form>
+<div class="status" id="profileStatus" role="status"></div>
+<div class="actions">
+<button class="secondary" id="signOut" type="button">Sign out</button>
+</div>
+<p class="note">Your account ID comes from the authentication provider and remains tied to your account. Username uniqueness and profile saving require the database setup.</p>
+</section>
+<footer>OUR SEARCH · Your account, your identity</footer>
+</main>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+// Add the project's public URL and publishable/anon key after configuring Supabase.
+// Never put a service-role or secret key in this browser file.
+const SUPABASE_URL = 'https://rxhyxmfayalrjmicsomm.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_3bKiIeuQq_yVrNK59Bk96A_9Y31q8hI';
+
+const signedOut = document.getElementById('signedOut');
+const profilePanel = document.getElementById('profilePanel');
+const loginStatus = document.getElementById('loginStatus');
+const profileStatus = document.getElementById('profileStatus');
+const loginButton = document.getElementById('googleLogin');
+const form = document.getElementById('profileForm');
+let supabase = null;
+let currentUser = null;
+let profileExists = false;
+let pendingAvatarUrl = '';
+
+function setStatus(element, message) {
+  element.textContent = message;
+}
+function showSignedOut(message = '') {
+  signedOut.classList.remove('hidden');
+  profilePanel.classList.add('hidden');
+  setStatus(loginStatus, message);
+}
+function showSignedIn() {
+  signedOut.classList.add('hidden');
+  profilePanel.classList.remove('hidden');
+}
+function validConfig() {
+  return SUPABASE_URL.startsWith('https://') &&
+    !SUPABASE_URL.includes('PASTE_') &&
+    SUPABASE_ANON_KEY.length > 20 &&
+    !SUPABASE_ANON_KEY.includes('PASTE_');
+}
+function safeUsername(value) {
+  return /^[A-Za-z0-9_]{3,30}$/.test(value);
+}
+
+async function loadProfile(user) {
+  currentUser = user;
+  showSignedIn();
+  document.getElementById('userId').textContent = user.id;
+  document.getElementById('emailText').textContent = user.email || '';
+  const metadata = user.user_metadata || {};
+  const displayName = metadata.full_name || metadata.name || '';
+  document.getElementById('profileHeading').textContent = displayName || 'Your account';
+  document.getElementById('displayName').value = displayName;
+
+  const photo = pendingAvatarUrl || metadata.avatar_url || metadata.picture || '';
+pendingAvatarUrl = photo;
+  const avatar = document.getElementById('avatar');
+  const fallback = document.getElementById('avatarFallback');
+  if (photo) {
+    avatar.src = photo;
+    avatar.classList.remove('hidden');
+    fallback.classList.add('hidden');
+  } else {
+    avatar.classList.add('hidden');
+    fallback.classList.remove('hidden');
+  }
+
+  if (!supabase) return;
+  setStatus(profileStatus, 'Loading your profile…');
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('username, display_name, bio, avatar_url')
+    .eq('user_id', user.id)
+    .maybeSingle();
+
+  if (error) {
+    setStatus(profileStatus, 'Sign-in succeeded, but profile storage is not configured yet. Database setup is still required.');
+    return;
+  }
+  profileExists = !!data;
+  if (data) {
+    pendingAvatarUrl = data.avatar_url || pendingAvatarUrl;
+    if (pendingAvatarUrl) {
+      const savedAvatar = document.getElementById('avatar');
+      savedAvatar.src = pendingAvatarUrl;
+      savedAvatar.classList.remove('hidden');
+      document.getElementById('avatarFallback').classList.add('hidden');
+    }
+    document.getElementById('username').value = data.username || '';
+    document.getElementById('displayName').value = data.display_name || displayName;
+    document.getElementById('bio').value = data.bio || '';
+    document.getElementById('profileHeading').textContent = data.display_name || displayName || 'Your account';
+    setStatus(profileStatus, 'Profile loaded.');
+  } else {
+    setStatus(profileStatus, 'Choose a unique username to finish setting up your profile.');
+  }
+}
+
+if (validConfig()) {
+  supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  supabase.auth.onAuthStateChange((_event, session) => {
+    if (session?.user) {
+      queueMicrotask(() => loadProfile(session.user));
+    } else {
+      currentUser = null;
+      profileExists = false;
+      showSignedOut();
+    }
+  });
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session?.user) await loadProfile(session.user);
+} else {
+  showSignedOut('Setup required: connect the real Supabase project before Google sign-in can work.');
+}
+
+loginButton.addEventListener('click', async () => {
+  if (!supabase) {
+    setStatus(loginStatus, 'Google login is not connected yet. First configure Supabase and add its public URL and key to this page.');
+    return;
+  }
+  loginButton.disabled = true;
+  setStatus(loginStatus, 'Opening Google sign-in…');
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin + '/profile.html' }
+  });
+  if (error) setStatus(loginStatus, error.message);
+  loginButton.disabled = false;
+});
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!supabase || !currentUser) {
+    setStatus(profileStatus, 'Please sign in after authentication is configured.');
+    return;
+  }
+  const username = document.getElementById('username').value.trim().replace(/^@/, '');
+  const displayName = document.getElementById('displayName').value.trim();
+  const bio = document.getElementById('bio').value.trim();
+  if (!safeUsername(username)) {
+    setStatus(profileStatus, 'Username must be 3–30 characters using letters, numbers or underscores.');
+    return;
+  }
+  if (!displayName) {
+    setStatus(profileStatus, 'Please enter a display name.');
+    return;
+  }
+
+  const button = document.getElementById('saveProfile');
+  button.disabled = true;
+  setStatus(profileStatus, 'Saving profile…');
+  const payload = {
+    user_id: currentUser.id,
+    username,
+    display_name: displayName,
+    bio,
+    avatar_url: pendingAvatarUrl,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = await supabase.from('profiles').upsert(payload, { onConflict: 'user_id' });
+  if (error) {
+    setStatus(profileStatus, error.code === '23505'
+      ? 'That username is already taken. Please choose another.'
+      : 'Could not save yet. Check the profiles table and its security policies are configured.');
+  } else {
+    profileExists = true;
+    document.getElementById('profileHeading').textContent = displayName;
+    setStatus(profileStatus, 'Profile saved successfully.');
+  }
+  button.disabled = false;
+});
+
+
+document.getElementById('uploadPicture').addEventListener('click', async () => {
+  const input = document.getElementById('profilePicture');
+  const button = document.getElementById('uploadPicture');
+  const file = input.files?.[0];
+
+  if (!supabase || !currentUser) {
+    setStatus(profileStatus, 'Please sign in before uploading a profile picture.');
+    return;
+  }
+  if (!file) {
+    setStatus(profileStatus, 'Choose a picture from your device first.');
+    return;
+  }
+  if (!file.type.startsWith('image/')) {
+    setStatus(profileStatus, 'Please choose an image file.');
+    return;
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    setStatus(profileStatus, 'Please choose an image smaller than 5 MB.');
+    return;
+  }
+
+  const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
+  const path = `${currentUser.id}/${Date.now()}-${safeName}`;
+
+  button.disabled = true;
+  setStatus(profileStatus, 'Uploading your picture…');
+
+  try {
+    const { error: uploadError } = await supabase.storage
+      .from('profile-pictures')
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type
+      });
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage
+      .from('profile-pictures')
+      .getPublicUrl(path);
+
+    pendingAvatarUrl = data.publicUrl;
+
+    const avatar = document.getElementById('avatar');
+    avatar.src = pendingAvatarUrl;
+    avatar.classList.remove('hidden');
+    document.getElementById('avatarFallback').classList.add('hidden');
+
+    setStatus(profileStatus, 'Picture uploaded! Press Save profile to save it to your account.');
+  } catch (error) {
+    setStatus(profileStatus, `Picture upload failed: ${error.message}`);
+  } finally {
+    button.disabled = false;
+  }
+});
+
+document.getElementById('signOut').addEventListener('click', async () => {
+  if (supabase) await supabase.auth.signOut();
+  showSignedOut('You have signed out.');
+});
+</script>
+</body>
+</html>
