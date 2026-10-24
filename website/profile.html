@@ -49,12 +49,23 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:24px}
 
 <section class="panel" id="signedOut">
 <h2>Sign in or create your account</h2>
-<p class="subtitle">Continue with Google. Your OUR SEARCH username and profile will be set up after sign-in.</p>
-<button class="google" id="googleLogin" type="button">
-<span class="google-mark">G</span> Continue with Google
-</button>
+<p class="subtitle">Use your email address to access your OUR SEARCH account.</p>
+
+<label for="authEmail">Email address</label>
+<input id="authEmail" type="email" autocomplete="email"
+       placeholder="you@example.com" required>
+
+<label for="authPassword">Password</label>
+<input id="authPassword" type="password" autocomplete="current-password"
+       minlength="8" placeholder="At least 8 characters" required>
+
+<div class="actions">
+<button class="primary" id="emailLogin" type="button">Sign in</button>
+<button class="secondary" id="createAccount" type="button">Create account</button>
+</div>
+
 <p class="status" id="loginStatus" role="status"></p>
-<p class="note">OUR SEARCH will never ask for your Google password on this page. Google authentication must be configured before sign-in can work.</p>
+<p class="note">Use a valid email address. New accounts may need email verification before you can sign in.</p>
 </section>
 
 <section class="panel hidden" id="profilePanel">
@@ -107,7 +118,8 @@ const signedOut = document.getElementById('signedOut');
 const profilePanel = document.getElementById('profilePanel');
 const loginStatus = document.getElementById('loginStatus');
 const profileStatus = document.getElementById('profileStatus');
-const loginButton = document.getElementById('googleLogin');
+const loginButton = document.getElementById('emailLogin');
+const createAccountButton = document.getElementById('createAccount');
 const form = document.getElementById('profileForm');
 let supabase = null;
 let currentUser = null;
@@ -209,17 +221,77 @@ if (validConfig()) {
 
 loginButton.addEventListener('click', async () => {
   if (!supabase) {
-    setStatus(loginStatus, 'Google login is not connected yet. First configure Supabase and add its public URL and key to this page.');
+    setStatus(loginStatus, 'Authentication is not configured. Please check the Supabase URL and public key.');
     return;
   }
+
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+
+  if (!email || !password) {
+    setStatus(loginStatus, 'Enter your email address and password.');
+    return;
+  }
+
   loginButton.disabled = true;
-  setStatus(loginStatus, 'Opening Google sign-in…');
-  const { error } = await supabase.auth.signInWithOAuth({
-    provider: 'google',
-    options: { redirectTo: window.location.origin + '/profile.html' }
-  });
-  if (error) setStatus(loginStatus, error.message);
-  loginButton.disabled = false;
+  createAccountButton.disabled = true;
+  setStatus(loginStatus, 'Signing in…');
+
+  try {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password
+    });
+    if (error) throw error;
+    setStatus(loginStatus, 'Signed in successfully. Loading your profile…');
+  } catch (error) {
+    setStatus(loginStatus, error.message);
+  } finally {
+    loginButton.disabled = false;
+    createAccountButton.disabled = false;
+  }
+});
+
+createAccountButton.addEventListener('click', async () => {
+  if (!supabase) {
+    setStatus(loginStatus, 'Authentication is not configured. Please check the Supabase URL and public key.');
+    return;
+  }
+
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+
+  if (!email || !password) {
+    setStatus(loginStatus, 'Enter your email address and choose a password.');
+    return;
+  }
+  if (password.length < 8) {
+    setStatus(loginStatus, 'Your password must be at least 8 characters.');
+    return;
+  }
+
+  loginButton.disabled = true;
+  createAccountButton.disabled = true;
+  setStatus(loginStatus, 'Creating your account…');
+
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password
+    });
+    if (error) throw error;
+
+    if (data.session) {
+      setStatus(loginStatus, 'Account created! Loading your profile…');
+    } else {
+      setStatus(loginStatus, 'Account created. Check your email for a verification link, then sign in.');
+    }
+  } catch (error) {
+    setStatus(loginStatus, error.message);
+  } finally {
+    loginButton.disabled = false;
+    createAccountButton.disabled = false;
+  }
 });
 
 form.addEventListener('submit', async (event) => {
