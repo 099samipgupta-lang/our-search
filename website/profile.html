@@ -85,6 +85,47 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:24px}
 \n
 /* Give the signed-in profile more room */
 main{width:min(935px,92%);margin:30px auto 80px}
+\n
+/* OUR SEARCH creator profile */
+.creator-profile{width:100%;max-width:850px;margin:0 auto}
+.creator-identity{display:grid;grid-template-columns:160px minmax(0,1fr);gap:clamp(22px,5vw,58px);align-items:center;padding:28px 12px 22px}
+.profile-avatar-wrap{display:flex;align-items:center;justify-content:center}
+.profile-avatar-wrap .avatar{width:clamp(94px,15vw,148px);height:clamp(94px,15vw,148px);border:2px solid #34425a;background:#202d42;font-size:42px}
+.creator-heading{min-width:0}
+.creator-heading h2{font-size:clamp(23px,3.5vw,32px);font-weight:650;line-height:1.2;overflow-wrap:anywhere;margin:0 0 8px}
+.creator-handle{font-size:15px;color:var(--cyan);margin-bottom:9px;overflow-wrap:anywhere}
+.creator-bio{font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
+.creator-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:19px 8px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.creator-stat{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:5px;text-align:center}
+.creator-stat strong{font-size:22px;line-height:1.2}
+.creator-stat span{font-size:13px;color:var(--muted)}
+.creator-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;padding:20px 8px}
+.creator-actions button{width:100%;min-height:44px;border-radius:10px;font-size:14px}
+.monthly-users{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:16px 18px;border:1px solid var(--line);border-radius:13px;background:rgba(17,23,37,.7)}
+.monthly-users span{font-size:14px;color:var(--muted)}
+.monthly-users strong{font-size:22px}
+.monthly-note{margin:8px 3px 25px}
+.creator-content-heading{display:flex;align-items:center;justify-content:center;gap:10px;padding:20px 10px;border-top:1px solid var(--line)}
+.creator-content-heading h3{margin:0;font-size:14px;letter-spacing:1.4px;text-transform:uppercase}
+.content-heading-icon{font-size:21px}
+.creation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px}
+.empty-creations{grid-column:1/-1;min-height:245px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;color:var(--muted)}
+.empty-creation-icon{width:62px;height:62px;border:2px solid var(--text);border-radius:50%;display:grid;place-items:center;font-size:30px;color:var(--text)}
+.empty-creations h3{color:var(--text);margin:15px 0 6px}
+.empty-creations p{max-width:340px;font-size:13px;line-height:1.65;margin:0}
+@media(max-width:520px){
+  .creator-identity{grid-template-columns:88px minmax(0,1fr);gap:15px;padding:22px 0 20px}
+  .profile-avatar-wrap .avatar{width:78px;height:78px;font-size:28px}
+  .creator-heading h2{font-size:22px}
+  .creator-handle{font-size:13px}
+  .creator-bio{font-size:13px}
+  .creator-stats{padding:16px 0;gap:4px}
+  .creator-stat strong{font-size:20px}
+  .creator-stat span{font-size:12px}
+  .creator-actions{gap:7px;padding:16px 0}
+  .creator-actions button{font-size:12px;padding:10px 5px;min-height:42px}
+  .monthly-users{padding:14px}
+}
 \n</style>
 </head>
 <body>
@@ -124,43 +165,66 @@ main{width:min(935px,92%);margin:30px auto 80px}
 </section>
 
 <section class="profile-shell hidden" id="profilePanel">
-  <div class="profile-top">
-    <div class="profile-avatar-wrap">
-      <img class="avatar hidden" id="avatar" alt="Profile photo">
-      <div class="avatar" id="avatarFallback">U</div>
-    </div>
-
-    <div class="profile-details">
-      <div class="profile-title-row">
-        <h2 id="profileHeading">Your account</h2>
-        <button class="secondary edit-profile-btn" id="editProfile" type="button">Edit profile</button>
-        <button class="secondary signout-btn" id="signOut" type="button">Sign out</button>
+  <section class="creator-profile">
+    <div class="creator-identity">
+      <div class="profile-avatar-wrap">
+        <img class="avatar hidden" id="avatar" alt="Profile photo">
+        <div class="avatar" id="avatarFallback">U</div>
       </div>
 
-      <div class="profile-stats">
-        <div><strong>OUR SEARCH</strong><span>Profile</span></div>
-        <div><strong id="profileUsername">@username</strong><span>Username</span></div>
-      </div>
-
-      <div class="profile-bio">
-        <div id="profileDisplayName" class="profile-display-name"></div>
-        <p id="profileBio">Welcome to my OUR SEARCH profile.</p>
-        <div id="emailText" class="note"></div>
-        <div class="account-id">OUR SEARCH ID: <span id="userId"></span></div>
+      <div class="creator-heading">
+        <h2 id="profileHeading">Your name</h2>
+        <div class="creator-handle" id="profileUsername">@username</div>
+        <p class="creator-bio" id="profileBio">Welcome to my OUR SEARCH profile.</p>
       </div>
     </div>
-  </div>
 
-  <div class="profile-tabs">
-    <span class="active-tab">▦ &nbsp; CREATIONS</span>
-  </div>
-  <div class="creation-grid" id="creationGrid">
-    <div class="empty-creations">
-      <div class="empty-creation-icon">▧</div>
-      <h3>Your creative space</h3>
-      <p>Your creations will appear here as you publish them on OUR SEARCH.</p>
+    <div class="creator-stats">
+      <div class="creator-stat">
+        <strong id="aiCardCount">0</strong>
+        <span>AI cards</span>
+      </div>
+      <div class="creator-stat">
+        <strong id="followerCount">0</strong>
+        <span>Followers</span>
+      </div>
+      <div class="creator-stat">
+        <strong id="followingCount">0</strong>
+        <span>Following</span>
+      </div>
     </div>
-  </div>
+
+    <div class="creator-actions">
+      <button class="secondary" id="editProfile" type="button">Edit profile</button>
+      <button class="secondary" id="shareProfile" type="button">Share profile</button>
+      <button class="secondary signout-btn" id="signOut" type="button">Sign out</button>
+    </div>
+    <div class="status" id="shareStatus" role="status" aria-live="polite"></div>
+
+    <div class="monthly-users">
+      <span>Users this month</span>
+      <strong id="monthlyUserCount">0</strong>
+    </div>
+    <p class="hint monthly-note">Monthly platform usage will be connected to real OUR SEARCH analytics.</p>
+
+    <div class="creator-content-heading">
+      <span class="content-heading-icon">▦</span>
+      <h3>AI cards</h3>
+    </div>
+
+    <div class="creation-grid" id="creationGrid">
+      <div class="empty-creations">
+        <div class="empty-creation-icon">▧</div>
+        <h3>Your AI cards will live here</h3>
+        <p>When you publish AI creations on OUR SEARCH, they can appear in this space.</p>
+      </div>
+    </div>
+
+    <div class="account-details-hidden hidden" aria-hidden="true">
+      <div id="emailText"></div>
+      <span id="userId"></span>
+    </div>
+  </section>
 
   <div class="edit-profile-panel hidden" id="editProfilePanel">
     <div class="edit-heading">
@@ -257,9 +321,8 @@ async function loadProfile(user) {
   const displayName = metadata.full_name || metadata.name || '';
 
   document.getElementById('displayName').value = displayName;
-  document.getElementById('profileHeading').textContent = 'Complete your profile';
+  document.getElementById('profileHeading').textContent = displayName || 'Complete your profile';
   document.getElementById('profileUsername').textContent = '@username';
-  document.getElementById('profileDisplayName').textContent = displayName;
   document.getElementById('profileBio').textContent = 'Welcome to my OUR SEARCH profile.';
 
   const avatar = document.getElementById('avatar');
@@ -304,14 +367,19 @@ async function loadProfile(user) {
     document.getElementById('displayName').value = data.display_name || displayName;
     document.getElementById('bio').value = data.bio || '';
 
+    const savedDisplayName = data.display_name || displayName;
     document.getElementById('profileHeading').textContent =
-      data.username ? '@' + data.username : 'Complete your profile';
+      savedDisplayName || 'Complete your profile';
     document.getElementById('profileUsername').textContent =
       data.username ? '@' + data.username : '@username';
-    document.getElementById('profileDisplayName').textContent =
-      data.display_name || displayName;
     document.getElementById('profileBio').textContent =
       data.bio || 'Welcome to my OUR SEARCH profile.';
+
+    if (!data.avatar_url && !photo) {
+      fallback.textContent = (savedDisplayName || user.email || 'U').charAt(0).toUpperCase();
+      fallback.classList.remove('hidden');
+      avatar.classList.add('hidden');
+    }
 
     pendingAvatarUrl = data.avatar_url || photo;
 
@@ -460,9 +528,8 @@ form.addEventListener('submit', async (event) => {
   } else {
     profileExists = true;
 
-    document.getElementById('profileHeading').textContent = '@' + username;
+    document.getElementById('profileHeading').textContent = displayName;
     document.getElementById('profileUsername').textContent = '@' + username;
-    document.getElementById('profileDisplayName').textContent = displayName;
     document.getElementById('profileBio').textContent =
       bio || 'Welcome to my OUR SEARCH profile.';
 
@@ -472,6 +539,26 @@ form.addEventListener('submit', async (event) => {
   button.disabled = false;
 });
 
+
+const shareStatus = document.getElementById('shareStatus');
+
+document.getElementById('shareProfile').addEventListener('click', async () => {
+  const shareUrl = window.location.href;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: 'OUR SEARCH profile', url: shareUrl });
+    } else if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+      setStatus(shareStatus, 'Profile link copied. You can share it with others.');
+    } else {
+      window.prompt('Copy your OUR SEARCH profile link:', shareUrl);
+    }
+  } catch (error) {
+    if (error.name !== 'AbortError') {
+      setStatus(shareStatus, 'Unable to share automatically. You can copy this profile link: ' + shareUrl);
+    }
+  }
+});
 
 document.getElementById('editProfile').addEventListener('click', () => {
   document.getElementById('editProfilePanel').classList.remove('hidden');
