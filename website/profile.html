@@ -38,7 +38,54 @@ textarea{min-height:105px;resize:vertical}
 .actions button{width:100%;height:48px;box-sizing:border-box;display:flex;align-items:center;justify-content:center;flex:1;margin:0;white-space:nowrap}
 .actions .hint{min-height:30px}
 footer{text-align:center;color:var(--muted);font-size:12px;margin-top:24px}
-</style>
+
+/* Instagram-inspired OUR SEARCH profile */
+.profile-shell{width:100%;background:transparent}
+.profile-top{display:grid;grid-template-columns: minmax(100px, 155px) 1fr;gap:clamp(22px,6vw,65px);padding:30px 0 38px;align-items:start}
+.profile-avatar-wrap{display:flex;justify-content:center;align-items:flex-start;padding-top:8px}
+.profile-avatar-wrap .avatar{width:clamp(90px,17vw,150px);height:clamp(90px,17vw,150px);border:2px solid #d8d8d8;background:#202d42;font-size:44px}
+.profile-details{min-width:0}
+.profile-title-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.profile-title-row h2{font-size:clamp(20px,3vw,27px);font-weight:400;margin:0 8px 0 0;overflow-wrap:anywhere}
+.profile-title-row button{width:auto;height:38px;padding:0 16px;border-radius:8px;font-size:13px}
+.profile-stats{display:flex;gap:clamp(18px,4vw,42px);margin:25px 0 20px;flex-wrap:wrap}
+.profile-stats div{display:flex;gap:5px;align-items:center;flex-wrap:wrap;font-size:14px}
+.profile-stats strong{font-weight:750}
+.profile-stats span{color:var(--muted)}
+.profile-bio{font-size:14px;line-height:1.55;overflow-wrap:anywhere}
+.profile-display-name{font-weight:750}
+.profile-bio p{margin:3px 0 7px;white-space:pre-wrap}
+.profile-bio .note{margin:5px 0;font-size:12px}
+.profile-tabs{display:flex;justify-content:center;border-top:1px solid var(--line);height:54px}
+.profile-tabs span{display:flex;align-items:center;justify-content:center;min-width:150px;font-size:11px;letter-spacing:1px;color:var(--muted)}
+.profile-tabs .active-tab{border-top:1px solid var(--text);color:var(--text)}
+.creation-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px}
+.empty-creations{grid-column:1/-1;min-height:230px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;color:var(--muted)}
+.empty-creation-icon{width:58px;height:58px;border:2px solid var(--text);border-radius:50%;display:grid;place-items:center;font-size:30px;color:var(--text)}
+.empty-creations h3{color:var(--text);margin:14px 0 5px}
+.empty-creations p{max-width:330px;font-size:13px;line-height:1.6;margin:0}
+.edit-profile-panel{max-width:520px;margin:28px auto 0;padding:24px;background:var(--panel);border:1px solid var(--line);border-radius:18px}
+.edit-heading h2{margin:0 0 5px}
+.edit-heading p{color:var(--muted);font-size:14px;margin:0 0 20px}
+.edit-profile-panel .picture-upload{margin-bottom:22px}
+.edit-profile-panel .primary{margin-top:20px}
+.cancel-edit{margin-top:12px;width:100%}
+@media(max-width:520px){
+  main{width:92%;margin:20px auto 70px}
+  .profile-top{grid-template-columns:86px 1fr;gap:15px;padding:20px 0 26px}
+  .profile-avatar-wrap .avatar{width:78px;height:78px;font-size:28px}
+  .profile-title-row{gap:7px}
+  .profile-title-row h2{width:100%;font-size:21px;margin-bottom:3px}
+  .profile-title-row button{height:34px;padding:0 10px;font-size:12px}
+  .profile-stats{gap:12px;margin:18px 0 14px}
+  .profile-stats div{font-size:12px;gap:3px}
+  .profile-bio{font-size:13px}
+  .edit-profile-panel{padding:18px}
+}
+\n
+/* Give the signed-in profile more room */
+main{width:min(935px,92%);margin:30px auto 80px}
+\n</style>
 </head>
 <body>
 <header>
@@ -46,8 +93,8 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:24px}
 <a href="/home1.html">Back to Home</a>
 </header>
 <main>
-<h1>Your profile</h1>
-<p class="subtitle">One account for your identity across OUR SEARCH.</p>
+<h1 id="pageHeading">Your profile</h1>
+<p class="subtitle" id="pageSubtitle">One account for your identity across OUR SEARCH.</p>
 
 <section class="panel" id="signedOut">
 <h2>Sign in or create your account</h2>
@@ -76,40 +123,78 @@ footer{text-align:center;color:var(--muted);font-size:12px;margin-top:24px}
 <p class="note">Use a valid email address. New accounts may need email verification before you can sign in.</p>
 </section>
 
-<section class="panel hidden" id="profilePanel">
-<div class="profile-head">
-<img class="avatar hidden" id="avatar" alt="Profile photo">
-<div class="avatar" id="avatarFallback">U</div>
-<div>
-<h2 id="profileHeading">Your account</h2>
-<div id="emailText" class="note"></div>
-<div class="account-id">OUR SEARCH ID: <span id="userId"></span></div>
-</div>
-</div>
-<div class="picture-upload">
-<label for="profilePicture">Profile picture</label>
-<input id="profilePicture" type="file" accept="image/*">
-<button class="secondary" id="uploadPicture" type="button">Upload picture</button>
-<p class="hint">Choose an image from your device, then upload it to your OUR SEARCH profile.</p>
-</div>
-<form id="profileForm">
-<label for="username">Username</label>
-<input id="username" name="username" maxlength="30" pattern="[A-Za-z0-9_]{3,30}" required autocomplete="username" placeholder="your_username">
-<div class="hint">3–30 characters. Letters, numbers and underscores only. Must be unique.</div>
+<section class="profile-shell hidden" id="profilePanel">
+  <div class="profile-top">
+    <div class="profile-avatar-wrap">
+      <img class="avatar hidden" id="avatar" alt="Profile photo">
+      <div class="avatar" id="avatarFallback">U</div>
+    </div>
 
-<label for="displayName">Display name</label>
-<input id="displayName" name="displayName" maxlength="60" required placeholder="Your name">
+    <div class="profile-details">
+      <div class="profile-title-row">
+        <h2 id="profileHeading">Your account</h2>
+        <button class="secondary edit-profile-btn" id="editProfile" type="button">Edit profile</button>
+        <button class="secondary signout-btn" id="signOut" type="button">Sign out</button>
+      </div>
 
-<label for="bio">Bio</label>
-<textarea id="bio" name="bio" maxlength="160" placeholder="Tell people a little about yourself (160 characters max)"></textarea>
+      <div class="profile-stats">
+        <div><strong>OUR SEARCH</strong><span>Profile</span></div>
+        <div><strong id="profileUsername">@username</strong><span>Username</span></div>
+      </div>
 
-<button class="primary" id="saveProfile" type="submit">Save profile</button>
-</form>
-<div class="status" id="profileStatus" role="status"></div>
-<div class="actions">
-<button class="secondary" id="signOut" type="button">Sign out</button>
-</div>
-<p class="note">Your account ID comes from the authentication provider and remains tied to your account. Username uniqueness and profile saving require the database setup.</p>
+      <div class="profile-bio">
+        <div id="profileDisplayName" class="profile-display-name"></div>
+        <p id="profileBio">Welcome to my OUR SEARCH profile.</p>
+        <div id="emailText" class="note"></div>
+        <div class="account-id">OUR SEARCH ID: <span id="userId"></span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="profile-tabs">
+    <span class="active-tab">▦ &nbsp; CREATIONS</span>
+  </div>
+  <div class="creation-grid" id="creationGrid">
+    <div class="empty-creations">
+      <div class="empty-creation-icon">▧</div>
+      <h3>Your creative space</h3>
+      <p>Your creations will appear here as you publish them on OUR SEARCH.</p>
+    </div>
+  </div>
+
+  <div class="edit-profile-panel hidden" id="editProfilePanel">
+    <div class="edit-heading">
+      <h2>Edit profile</h2>
+      <p>Update how people see you on OUR SEARCH.</p>
+    </div>
+
+    <div class="picture-upload">
+      <label for="profilePicture">Profile picture</label>
+      <input id="profilePicture" type="file" accept="image/*">
+      <button class="secondary" id="uploadPicture" type="button">Upload picture</button>
+      <p class="hint">Choose an image from your device. Images must be smaller than 5 MB.</p>
+    </div>
+
+    <form id="profileForm">
+      <label for="username">Username</label>
+      <input id="username" name="username" maxlength="30"
+             pattern="[A-Za-z0-9_]{3,30}" required autocomplete="username"
+             placeholder="your_username">
+      <div class="hint">3–30 characters. Letters, numbers and underscores only. Must be unique.</div>
+
+      <label for="displayName">Display name</label>
+      <input id="displayName" name="displayName" maxlength="60"
+             required placeholder="Your name">
+
+      <label for="bio">Bio</label>
+      <textarea id="bio" name="bio" maxlength="160"
+                placeholder="Tell people a little about yourself (160 characters max)"></textarea>
+
+      <button class="primary" id="saveProfile" type="submit">Save profile</button>
+    </form>
+    <div class="status" id="profileStatus" role="status"></div>
+    <button class="secondary cancel-edit" id="cancelEditProfile" type="button">Cancel</button>
+  </div>
 </section>
 <footer>OUR SEARCH · Your account, your identity</footer>
 </main>
@@ -140,11 +225,15 @@ function setStatus(element, message) {
 function showSignedOut(message = '') {
   signedOut.classList.remove('hidden');
   profilePanel.classList.add('hidden');
+  document.getElementById('pageHeading').classList.remove('hidden');
+  document.getElementById('pageSubtitle').classList.remove('hidden');
   setStatus(loginStatus, message);
 }
 function showSignedIn() {
   signedOut.classList.add('hidden');
   profilePanel.classList.remove('hidden');
+  document.getElementById('pageHeading').classList.add('hidden');
+  document.getElementById('pageSubtitle').classList.add('hidden');
 }
 function validConfig() {
   return SUPABASE_URL.startsWith('https://') &&
@@ -158,29 +247,44 @@ function safeUsername(value) {
 
 async function loadProfile(user) {
   currentUser = user;
+  pendingAvatarUrl = '';
   showSignedIn();
+
   document.getElementById('userId').textContent = user.id;
   document.getElementById('emailText').textContent = user.email || '';
+
   const metadata = user.user_metadata || {};
   const displayName = metadata.full_name || metadata.name || '';
-  document.getElementById('profileHeading').textContent = displayName || 'Your account';
-  document.getElementById('displayName').value = displayName;
 
-  const photo = pendingAvatarUrl || metadata.avatar_url || metadata.picture || '';
-pendingAvatarUrl = photo;
+  document.getElementById('displayName').value = displayName;
+  document.getElementById('profileHeading').textContent = 'Complete your profile';
+  document.getElementById('profileUsername').textContent = '@username';
+  document.getElementById('profileDisplayName').textContent = displayName;
+  document.getElementById('profileBio').textContent = 'Welcome to my OUR SEARCH profile.';
+
   const avatar = document.getElementById('avatar');
   const fallback = document.getElementById('avatarFallback');
+  const photo = metadata.avatar_url || metadata.picture || '';
+
   if (photo) {
     avatar.src = photo;
     avatar.classList.remove('hidden');
     fallback.classList.add('hidden');
   } else {
+    avatar.removeAttribute('src');
     avatar.classList.add('hidden');
+    fallback.textContent = (displayName || user.email || 'U').charAt(0).toUpperCase();
     fallback.classList.remove('hidden');
   }
 
-  if (!supabase) return;
+  const editPanel = document.getElementById('editProfilePanel');
+  if (!supabase) {
+    editPanel.classList.remove('hidden');
+    return;
+  }
+
   setStatus(profileStatus, 'Loading your profile…');
+
   const { data, error } = await supabase
     .from('profiles')
     .select('username, display_name, bio, avatar_url')
@@ -188,24 +292,41 @@ pendingAvatarUrl = photo;
     .maybeSingle();
 
   if (error) {
-    setStatus(profileStatus, 'Sign-in succeeded, but profile storage is not configured yet. Database setup is still required.');
+    editPanel.classList.remove('hidden');
+    setStatus(profileStatus, 'Could not load your saved profile: ' + error.message);
     return;
   }
+
   profileExists = !!data;
+
   if (data) {
-    pendingAvatarUrl = data.avatar_url || pendingAvatarUrl;
-    if (pendingAvatarUrl) {
-      const savedAvatar = document.getElementById('avatar');
-      savedAvatar.src = pendingAvatarUrl;
-      savedAvatar.classList.remove('hidden');
-      document.getElementById('avatarFallback').classList.add('hidden');
-    }
     document.getElementById('username').value = data.username || '';
     document.getElementById('displayName').value = data.display_name || displayName;
     document.getElementById('bio').value = data.bio || '';
-    document.getElementById('profileHeading').textContent = data.display_name || displayName || 'Your account';
+
+    document.getElementById('profileHeading').textContent =
+      data.username ? '@' + data.username : 'Complete your profile';
+    document.getElementById('profileUsername').textContent =
+      data.username ? '@' + data.username : '@username';
+    document.getElementById('profileDisplayName').textContent =
+      data.display_name || displayName;
+    document.getElementById('profileBio').textContent =
+      data.bio || 'Welcome to my OUR SEARCH profile.';
+
+    pendingAvatarUrl = data.avatar_url || photo;
+
+    if (pendingAvatarUrl) {
+      avatar.src = pendingAvatarUrl;
+      avatar.classList.remove('hidden');
+      fallback.classList.add('hidden');
+    }
+
+    editPanel.classList.add('hidden');
     setStatus(profileStatus, 'Profile loaded.');
   } else {
+    document.getElementById('username').value = '';
+    document.getElementById('bio').value = '';
+    editPanel.classList.remove('hidden');
     setStatus(profileStatus, 'Choose a unique username to finish setting up your profile.');
   }
 }
@@ -338,12 +459,31 @@ form.addEventListener('submit', async (event) => {
       : 'Could not save yet. Check the profiles table and its security policies are configured.');
   } else {
     profileExists = true;
-    document.getElementById('profileHeading').textContent = displayName;
+
+    document.getElementById('profileHeading').textContent = '@' + username;
+    document.getElementById('profileUsername').textContent = '@' + username;
+    document.getElementById('profileDisplayName').textContent = displayName;
+    document.getElementById('profileBio').textContent =
+      bio || 'Welcome to my OUR SEARCH profile.';
+
+    document.getElementById('editProfilePanel').classList.add('hidden');
     setStatus(profileStatus, 'Profile saved successfully.');
   }
   button.disabled = false;
 });
 
+
+document.getElementById('editProfile').addEventListener('click', () => {
+  document.getElementById('editProfilePanel').classList.remove('hidden');
+  document.getElementById('editProfilePanel').scrollIntoView({
+    behavior: 'smooth',
+    block: 'start'
+  });
+});
+
+document.getElementById('cancelEditProfile').addEventListener('click', () => {
+  document.getElementById('editProfilePanel').classList.add('hidden');
+});
 
 document.getElementById('uploadPicture').addEventListener('click', async () => {
   const input = document.getElementById('profilePicture');
