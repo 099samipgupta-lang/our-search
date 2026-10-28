@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Studio — OUR SEARCH</title>
+<style>
+:root{color-scheme:dark;--bg:#080d18;--panel:#111a2b;--line:#26344b;--cyan:#56e7f5;--muted:#9aabc2}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(ellipse at top,#14243c,#080d18 55%);color:#edf5ff;font:16px system-ui,sans-serif;min-height:100vh}
+header{padding:20px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}
+a{color:var(--cyan);text-decoration:none}
+main{width:min(850px,92%);margin:32px auto 70px}
+.eyebrow{color:var(--cyan);font-size:12px;letter-spacing:2px;text-transform:uppercase}
+h1{font-size:clamp(30px,6vw,46px);margin:8px 0}
+p{color:var(--muted);line-height:1.6}
+.panel{background:#101929eF;border:1px solid var(--line);border-radius:18px;padding:22px;margin:22px 0}
+label{display:block;font-weight:600;margin:17px 0 7px}
+input,textarea,select{width:100%;padding:13px;border:1px solid #34445d;border-radius:10px;background:#09111f;color:#fff;font:inherit}
+textarea{min-height:105px;resize:vertical}
+button{border:0;border-radius:10px;padding:13px 18px;font:inherit;font-weight:700;cursor:pointer}
+.primary{background:var(--cyan);color:#07121b}
+.secondary{background:#1a2940;color:#eaf6ff;border:1px solid #354763}
+button:disabled{opacity:.55;cursor:wait}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
+.drop{border:1px dashed #54718e;border-radius:13px;padding:22px;text-align:center;background:#0a1423}
+.status{padding:12px;border-radius:10px;background:#0a1423;margin-top:15px;white-space:pre-wrap}
+.item{border-top:1px solid var(--line);padding:14px 0}
+.pill{display:inline-block;padding:4px 9px;border-radius:20px;background:#20334a;color:#aeeef5;font-size:12px}
+.hidden{display:none!important}
+small{color:var(--muted)}
+footer{text-align:center;padding:25px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <strong><a href="/home1.html">OUR SEARCH</a> / AI Studio</strong>
+  <a href="/profile.html">My account</a>
+</header>
+<main>
+  <div class="eyebrow">Creator workspace</div>
+  <h1>Bring your AI to OUR SEARCH.</h1>
+  <p>Submit a model for review or register an AI API provider. Approved and published submissions can appear in the discovery feed.</p>
+
+  <section class="panel" id="signedOut">
+    <h2>Sign in to continue</h2>
+    <p>AI submissions are connected to your OUR SEARCH account.</p>
+    <a href="/profile.html">Open your account and sign in →</a>
+  </section>
+
+  <section class="panel hidden" id="studio">
+    <div id="accountLine"><small>Checking account…</small></div>
+    <form id="submissionForm">
+      <label for="submissionType">What are you submitting?</label>
+      <select id="submissionType" required>
+        <option value="model_file">Upload a downloaded AI model</option>
+        <option value="api_connection">Register an external AI API provider</option>
+      </select>
+
+      <label for="aiName">AI name</label>
+      <input id="aiName" minlength="2" maxlength="80" required placeholder="e.g. My Language Model">
+
+      <label for="aiDescription">Description</label>
+      <textarea id="aiDescription" maxlength="2000" placeholder="What does your AI help people do?"></textarea>
+
+      <label for="aiCategory">Category</label>
+      <select id="aiCategory">
+        <option value="assistant">Assistant</option>
+        <option value="creation">Creation</option>
+        <option value="learning">Learning</option>
+        <option value="coding">Coding</option>
+        <option value="science">Science</option>
+        <option value="image">Image generation</option>
+        <option value="audio">Audio</option>
+        <option value="other" selected>Other</option>
+      </select>
+
+      <div id="modelFields">
+        <label for="modelFile">Choose model file from your device</label>
+        <div class="drop">
+          <input id="modelFile" type="file"
+            accept=".gguf,.safetensors,.onnx,.pt,.pth,.bin,.model,.tflite,.mlmodel,.zip">
+          <p id="fileInfo">Select a model file downloaded to your phone.</p>
+          <small>Supported formats depend on the model runtime we add. Uploading a file does not by itself make the model runnable.</small>
+        </div>
+      </div>
+
+      <div id="apiFields" class="hidden">
+        <label for="apiProvider">API provider name</label>
+        <input id="apiProvider" maxlength="100" placeholder="e.g. My AI service">
+        <p><small>Do not paste an API key or password here. Secure API credential storage and connection testing will be configured separately.</small></p>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="submitButton" type="submit">Submit for review</button>
+        <button class="secondary" id="refreshButton" type="button">Refresh my submissions</button>
+      </div>
+      <div class="status" id="formStatus" role="status" aria-live="polite">Connect the database and private storage to start submitting.</div>
+    </form>
+  </section>
+
+  <section class="panel hidden" id="mySubmissions">
+    <h2>My submissions</h2>
+    <p>Track your submissions and review feedback.</p>
+    <div id="submissionList"></div>
+  </section>
+</main>
+<footer>OUR SEARCH · Discover. Create. Learn. Experience.</footer>
+
+<script type="module">
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+const SUPABASE_URL = "https://rxhyxmfayalrjmicsomm.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_3bKiIeuQq_yVrNK59Bk96A_9Y31q8hI";
+const BUCKET = 'ai-models';
+
+const $ = id => document.getElementById(id);
+const supabase = SUPABASE_URL.startsWith('https://') &&
+  SUPABASE_ANON_KEY.length > 20 &&
+  !SUPABASE_ANON_KEY.includes('PASTE_')
+  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+
+let currentUser = null;
+
+function status(message) { $('formStatus').textContent = message; }
+function safeText(value) { return String(value ?? ''); }
+
+function updateSubmissionType() {
+  const isModel = $('submissionType').value === 'model_file';
+  $('modelFields').classList.toggle('hidden', !isModel);
+  $('apiFields').classList.toggle('hidden', isModel);
+  $('modelFile').required = isModel;
+  $('apiProvider').required = !isModel;
+}
+$('submissionType').addEventListener('change', updateSubmissionType);
+$('modelFile').addEventListener('change', () => {
+  const file = $('modelFile').files[0];
+  $('fileInfo').textContent = file
+    ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`
+    : 'Select a model file downloaded to your phone.';
+});
+
+async function loadSubmissions() {
+  if (!currentUser) return;
+  $('submissionList').textContent = 'Loading submissions…';
+  const { data, error } = await supabase
+    .from('ai_submissions')
+    .select('id,name,submission_type,status,review_note,created_at')
+    .eq('creator_id', currentUser.id)
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    $('submissionList').textContent =
+      `Could not load submissions: ${error.message}. Check that the database migration has been applied.`;
+    return;
+  }
+  $('submissionList').replaceChildren();
+  if (!data?.length) {
+    $('submissionList').textContent = 'No submissions yet.';
+    return;
+  }
+  for (const item of data) {
+    const row = document.createElement('div');
+    row.className = 'item';
+    const name = document.createElement('strong');
+    name.textContent = item.name;
+    const pill = document.createElement('span');
+    pill.className = 'pill';
+    pill.textContent = item.status.replaceAll('_', ' ');
+    const detail = document.createElement('p');
+    detail.textContent = `${item.submission_type.replaceAll('_', ' ')} · ${new Date(item.created_at).toLocaleString()}`;
+    row.append(name, document.createTextNode(' '), pill, detail);
+    if (item.review_note) {
+      const note = document.createElement('p');
+      note.textContent = `Review note: ${item.review_note}`;
+      row.append(note);
+    }
+    $('submissionList').append(row);
+  }
+}
+
+async function startStudio() {
+  if (!supabase) {
+    $('signedOut').classList.remove('hidden');
+    $('signedOut').querySelector('p').textContent =
+      'Supabase configuration is missing. Configure the public URL and publishable key first.';
+    return;
+  }
+  const { data: { session }, error } = await supabase.auth.getSession();
+  if (error) console.error(error);
+  currentUser = session?.user ?? null;
+  if (!currentUser) {
+    $('signedOut').classList.remove('hidden');
+    $('studio').classList.add('hidden');
+    $('mySubmissions').classList.add('hidden');
+    return;
+  }
+  $('signedOut').classList.add('hidden');
+  $('studio').classList.remove('hidden');
+  $('mySubmissions').classList.remove('hidden');
+  $('accountLine').textContent = `Signed in as ${currentUser.email || 'OUR SEARCH creator'}`;
+  await loadSubmissions();
+}
+
+$('refreshButton').addEventListener('click', loadSubmissions);
+
+$('submissionForm').addEventListener('submit', async event => {
+  event.preventDefault();
+  if (!supabase || !currentUser) {
+    status('Please sign in first.');
+    return;
+  }
+
+  const isModel = $('submissionType').value === 'model_file';
+  const file = $('modelFile').files[0];
+  const provider = $('apiProvider').value.trim();
+
+  if (isModel && !file) {
+    status('Choose a model file first.');
+    return;
+  }
+  if (!isModel && !provider) {
+    status('Enter the API provider name.');
+    return;
+  }
+
+  $('submitButton').disabled = true;
+  status('Preparing your submission…');
+  let storagePath = null;
+
+  try {
+    if (isModel) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      storagePath = `${currentUser.id}/${crypto.randomUUID()}-${safeName}`;
+      status('Uploading model file to private storage…');
+
+      const { error: uploadError } = await supabase.storage
+        .from(BUCKET)
+        .upload(storagePath, file, {
+          upsert: false,
+          contentType: file.type || 'application/octet-stream'
+        });
+      if (uploadError) throw new Error(
+        `Model upload failed: ${uploadError.message}. Check that the private "${BUCKET}" bucket and its upload policies are configured.`
+      );
+    }
+
+    status('Saving your submission…');
+    const record = {
+      creator_id: currentUser.id,
+      name: $('aiName').value.trim(),
+      description: $('aiDescription').value.trim(),
+      category: $('aiCategory').value,
+      submission_type: isModel ? 'model_file' : 'api_connection',
+      model_storage_path: storagePath,
+      api_provider: isModel ? null : provider,
+      status: 'pending_review'
+    };
+
+    const { error: insertError } = await supabase
+      .from('ai_submissions')
+      .insert(record);
+    if (insertError) {
+      throw new Error(
+        `Submission could not be saved: ${insertError.message}. If a file uploaded, it remains private; we can clean it up after fixing the database setup.`
+      );
+    }
+
+    status('Submitted successfully! Your AI is pending review. It will not appear in the public feed until it has been approved and published.');
+    $('submissionForm').reset();
+    updateSubmissionType();
+    $('fileInfo').textContent = 'Select a model file downloaded to your phone.';
+    await loadSubmissions();
+  } catch (error) {
+    status(error.message || 'Something went wrong. Please try again.');
+  } finally {
+    $('submitButton').disabled = false;
+  }
+});
+
+supabase?.auth.onAuthStateChange((_event, session) => {
+  currentUser = session?.user ?? null;
+  queueMicrotask(() => startStudio());
+});
+updateSubmissionType();
+await startStudio();
+</script>
+</body>
+</html>
