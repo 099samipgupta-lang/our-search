@@ -239,19 +239,31 @@ $('submissionForm').addEventListener('submit', async event => {
       if (authError || !authData.session?.access_token) {
         throw new Error('Please sign in again before uploading.');
       }
-      const response = await fetch('/model-upload', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/octet-stream',
-          'Authorization': `Bearer ${authData.session.access_token}`,
-          'X-Model-Storage-Key': storagePath
-        },
-        body: file
+      await new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/model-upload');
+        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+        xhr.setRequestHeader('Authorization', `Bearer ${authData.session.access_token}`);
+        xhr.setRequestHeader('X-Model-Storage-Key', storagePath);
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            status(`Uploading ${file.name}… ${percent}%`);
+          } else {
+            status(`Uploading ${file.name}…`);
+          }
+        };
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            reject(new Error(`Model upload failed (${xhr.status}). Please try again.`));
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error during model upload. Please try again.'));
+        xhr.onabort = () => reject(new Error('Model upload was cancelled.'));
+        xhr.send(file);
       });
-
-      if (!response.ok) {
-        throw new Error(`Phone storage upload failed (${response.status}). Check that the OUR SEARCH storage app is running.`);
-      }
     }
 
     status('Saving your submission…');
