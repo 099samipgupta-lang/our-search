@@ -239,31 +239,84 @@ $('submissionForm').addEventListener('submit', async event => {
       if (authError || !authData.session?.access_token) {
         throw new Error('Please sign in again before uploading.');
       }
-      await new Promise((resolve, reject) => {
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', '/model-upload');
-        xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-        xhr.setRequestHeader('Authorization', `Bearer ${authData.session.access_token}`);
-        xhr.setRequestHeader('X-Model-Storage-Key', storagePath);
-        xhr.upload.onprogress = (event) => {
-          if (event.lengthComputable) {
-            const percent = Math.round((event.loaded / event.total) * 100);
-            status(`Uploading ${file.name}… ${percent}%`);
-          } else {
-            status(`Uploading ${file.name}…`);
-          }
-        };
-        xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve();
-          } else {
-            reject(new Error(`Model upload failed (${xhr.status}). Please try again.`));
-          }
-        };
-        xhr.onerror = () => reject(new Error('Network error during model upload. Please try again.'));
-        xhr.onabort = () => reject(new Error('Model upload was cancelled.'));
-        xhr.send(file);
+      const startResponse = await fetch('/model-upload/start', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authData.session.access_token}`
+        },
+        body: JSON.stringify({
+          filename: file.name,
+          size: file.size,
+          storage_key: storagePath
+        })
       });
+
+      const startData = await startResponse.json().catch(() => ({}));
+      if (!startResponse.ok) {
+        throw new Error(startData.error || `Could not start upload (${startResponse.status}).`);
+      }
+
+      const { upload_id, upload_token, upload_url, chunk_size, chunks_received } = startData;
+      if (!upload_id || !upload_token || !upload_url ||
+          !Number.isInteger(chunk_size) || chunk_size <= 0) {
+        throw new Error('The storage server returned an invalid upload session.');
+      }
+
+      const totalChunks = Math.ceil(file.size / chunk_size);
+      let uploadedBytes = Math.min(file.size, chunks_received * chunk_size);
+
+      for (let index = chunks_received; index < totalChunks; index++) {
+        const first = index * chunk_size;
+        const last = Math.min(file.size, first + chunk_size);
+        const chunk = file.slice(first, last);
+
+        status(`Uploading ${file.name}… ${Math.round((uploadedBytes / file.size) * 100)}% (part ${index + 1}/${totalChunks})`);
+
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('PUT', `${upload_url}/uploads/${encodeURIComponent(upload_id)}/chunks/${index}`);
+          xhr.setRequestHeader('Authorization', `Bearer ${upload_token}`);
+          xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable) {
+              const current = uploadedBytes + Math.min(event.loaded, chunk.size);
+              const percent = Math.min(100, Math.round((current / file.size) * 100));
+              status(`Uploading ${file.name}… ${percent}% (part ${index + 1}/${totalChunks})`);
+            }
+          };
+
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              uploadedBytes += chunk.size;
+              resolve();
+            } else {
+              reject(new Error(`Upload part ${index + 1} failed (${xhr.status}). Please try submitting again.`));
+            }
+          };
+          xhr.onerror = () => reject(new Error('Network error while uploading a part. Please check your connection and try again.'));
+          xhr.onabort = () => reject(new Error('Model upload was cancelled.'));
+          xhr.send(chunk);
+        });
+      }
+
+      status(`Verifying ${file.name}…`);
+      const completeResponse = await fetch(
+        `${upload_url}/uploads/${encodeURIComponent(upload_id)}/complete`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${upload_token}`,
+            'Content-Type': 'application/json'
+          },
+          body: '{}'
+        }
+      );
+      const completeData = await completeResponse.json().catch(() => ({}));
+      if (!completeResponse.ok) {
+        throw new Error(completeData.error || `Could not verify and publish the upload (${completeResponse.status}).`);
+      }
     }
 
     status('Saving your submission…');

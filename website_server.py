@@ -395,6 +395,123 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             if connection:
                 connection.close()
 
+    def handle_model_upload_start(self):
+        import http.client
+        import re
+        from urllib.request import Request, urlopen
+        from index_storage.upload_auth import issue_upload_token
+
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            self.send_json(401, {"error": "sign_in_required"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            if length <= 0 or length > 65536:
+                self.send_json(400, {"error": "invalid_request_size"})
+                return
+            data = json.loads(self.rfile.read(length).decode("utf-8"))
+        except Exception:
+            self.send_json(400, {"error": "invalid_request"})
+            return
+
+        try:
+            request = Request(
+                "https://rxhyxmfayalrjmicsomm.supabase.co/auth/v1/user",
+                headers={
+                    "apikey": "sb_publishable_3bKiIeuQq_yVrNK59Bk96A_9Y31q8hI",
+                    "Authorization": auth,
+                },
+            )
+            with urlopen(request, timeout=15) as response:
+                user = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            self.send_json(401, {"error": "session_invalid"})
+            return
+
+        user_id = str(user.get("id", ""))
+        filename = data.get("filename")
+        size = data.get("size")
+        storage_key = data.get("storage_key")
+
+        if (
+            not user_id
+            or not isinstance(filename, str)
+            or not filename.strip()
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size <= 0
+            or size > 20 * 1024 * 1024 * 1024
+            or not isinstance(storage_key, str)
+            or not storage_key.startswith("ai-models/" + user_id + "/")
+            or ".." in storage_key
+            or not re.fullmatch(r"[A-Za-z0-9._/-]+", storage_key)
+        ):
+            self.send_json(400, {"error": "invalid_upload_details"})
+            return
+
+        api_key = os.environ.get("OUR_SEARCH_STORAGE_API_KEY", "")
+        if not api_key:
+            self.send_json(500, {"error": "storage_not_configured"})
+            return
+
+        connection = None
+        try:
+            import json as json_module
+
+            connection = http.client.HTTPSConnection(
+                "my-platform-9.onrender.com", timeout=60
+            )
+            body = json_module.dumps({
+                "filename": filename,
+                "size": size,
+                "user_id": user_id,
+                "storage_key": storage_key,
+            })
+            connection.request(
+                "POST",
+                "/uploads/start",
+                body=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Storage-API-Key": api_key,
+                    "Content-Length": str(len(body.encode("utf-8"))),
+                },
+            )
+            response = connection.getresponse()
+            raw = response.read(65536)
+            if response.status != 201:
+                self.send_json(502, {
+                    "error": "storage_session_start_failed",
+                    "storage_status": response.status,
+                })
+                return
+
+            session = json.loads(raw.decode("utf-8"))
+            upload_id = session["upload_id"]
+            token = issue_upload_token(
+                user_id=user_id,
+                storage_key=storage_key,
+                size=size,
+                upload_id=upload_id,
+                ttl=21600,
+            )
+            self.send_json(201, {
+                "upload_id": upload_id,
+                "chunk_size": session["chunk_size"],
+                "chunks_received": session["chunks_received"],
+                "upload_token": token,
+                "upload_url": "https://my-platform-9.onrender.com",
+                "token_ttl_seconds": 21600,
+            })
+        except Exception:
+            traceback.print_exc()
+            self.send_json(502, {"error": "upload_session_creation_failed"})
+        finally:
+            if connection:
+                connection.close()
+
     def do_POST(self):
 
         parsed = urlparse(
@@ -402,6 +519,10 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         )
 
         path = parsed.path
+
+        if path == "/model-upload/start":
+            self.handle_model_upload_start()
+            return
 
         if path == "/model-upload":
             self.handle_model_upload()

@@ -7,6 +7,14 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+from index_storage.upload_routes import make_upload_manager
+from index_storage.upload_routes import (
+    read_upload_json,
+    validate_capability,
+    expected_chunk_length,
+)
+from index_storage.resumable_uploads import UploadError
+from index_storage.upload_auth import UploadAuthorizationError
 
 from index_storage.local import LocalIndexStorage
 from index_storage.reverse import ReverseIndexStorage
@@ -39,6 +47,15 @@ STORAGE_API_KEY = os.environ.get(
     "OUR_SEARCH_STORAGE_API_KEY",
 )
 
+UPLOAD_ORIGIN = os.environ.get(
+    "OUR_SEARCH_UPLOAD_ORIGIN",
+    "https://my-platform-20.onrender.com",
+)
+
+STORAGE_MODE = os.environ.get(
+    "OUR_SEARCH_STORAGE_MODE", "local"
+).strip().lower()
+
 
 if not STORAGE_API_KEY:
     raise RuntimeError(
@@ -46,10 +63,7 @@ if not STORAGE_API_KEY:
     )
 
 
-if os.environ.get(
-    "OUR_SEARCH_STORAGE_MODE",
-    "local",
-).strip().lower() == "reverse":
+if STORAGE_MODE == "reverse":
 
     storage = ReverseIndexStorage(
         command_url=os.environ.get(
@@ -71,6 +85,12 @@ else:
         STORAGE_ROOT
     )
 
+upload_manager = (
+    make_upload_manager(STORAGE_ROOT)
+    if STORAGE_MODE == "local"
+    else None
+)
+
 REVERSE_COMMANDS = queue.Queue()
 
 # The reverse protocol has one shared response queue.
@@ -82,10 +102,7 @@ REVERSE_COMMAND_LOCK = threading.Lock()
 # must not load the remote index during startup.
 storage_repository = IndexStorageRepository(storage)
 
-if os.environ.get(
-    "OUR_SEARCH_STORAGE_MODE",
-    "local",
-).strip().lower() == "reverse":
+if STORAGE_MODE == "reverse":
     search_pipeline = None
     search_service = None
 else:
@@ -136,6 +153,54 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
 
         return False
 
+    def _add_upload_cors_headers(self):
+        origin = self.headers.get("Origin", "")
+        if origin == UPLOAD_ORIGIN:
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Authorization, Content-Type, X-Storage-API-Key",
+            )
+            self.send_header(
+                "Access-Control-Allow-Methods",
+                "GET, POST, PUT, OPTIONS",
+            )
+            self.send_header("Access-Control-Max-Age", "600")
+
+    def _validate_upload_capability(self, upload_id):
+        if upload_manager is None:
+            raise UploadError("resumable uploads require local storage mode")
+
+        payload = validate_capability(self, upload_manager, upload_id)
+        directory = upload_manager._directory(upload_id)
+        metadata = upload_manager._read_metadata(directory)
+
+        if (
+            metadata.get("user_id") != payload.get("uid")
+            or metadata.get("storage_key") != payload.get("key")
+            or metadata.get("size") != payload.get("size")
+            or metadata.get("upload_id") != upload_id
+        ):
+            raise UploadAuthorizationError(
+                "Upload capability does not match its session"
+            )
+
+        return payload, metadata
+
+    def _upload_error(self, exc):
+        if isinstance(exc, UploadAuthorizationError):
+            status = 401
+        elif isinstance(exc, FileExistsError):
+            status = 409
+        elif isinstance(exc, (UploadError, ValueError, TypeError)):
+            status = 400
+        else:
+            status = 500
+
+        message = str(exc) if status != 500 else "upload_internal_error"
+        self._send_json(status, {"error": message})
+
     def _send_json(
         self,
         status,
@@ -159,6 +224,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             str(len(data)),
         )
 
+        self._add_upload_cors_headers()
         self.end_headers()
 
         self.wfile.write(data)
@@ -181,6 +247,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             str(len(data)),
         )
 
+        self._add_upload_cors_headers()
         self.end_headers()
 
         self.wfile.write(data)
@@ -198,7 +265,41 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             length
         )
 
+    def do_OPTIONS(self):
+        if not self.path.startswith("/uploads/"):
+            self._send_json(404, {"error": "not_found"})
+            return
+
+        if self.headers.get("Origin", "") != UPLOAD_ORIGIN:
+            self._send_json(403, {"error": "origin_not_allowed"})
+            return
+
+        self.send_response(204)
+        self._add_upload_cors_headers()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _get_upload_status(self, upload_id):
+        if STORAGE_MODE != "local" or upload_manager is None:
+            self._send_json(503, {"error": "resumable_uploads_require_local_mode"})
+            return
+
+        try:
+            payload, metadata = self._validate_upload_capability(upload_id)
+            status = upload_manager.status(upload_id, payload["uid"])
+            self._send_json(200, status)
+        except Exception as exc:
+            self._upload_error(exc)
+
     def do_GET(self):
+        upload_match = __import__("re").fullmatch(
+            r"/uploads/([a-f0-9]{32})",
+            urlparse(self.path).path,
+        )
+        if upload_match:
+            self._get_upload_status(upload_match.group(1))
+            return
+
 
         if self.path == "/health":
 
@@ -387,7 +488,93 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             },
         )
 
+    def _start_model_upload(self):
+        if STORAGE_MODE != "local" or upload_manager is None:
+            self._send_json(503, {"error": "resumable_uploads_require_local_mode"})
+            return
+
+        if not self._require_auth():
+            return
+
+        try:
+            data = read_upload_json(self)
+            user_id = data.get("user_id")
+            storage_key = data.get("storage_key")
+            filename = data.get("filename")
+            size = data.get("size")
+
+            if not isinstance(size, int) or isinstance(size, bool):
+                raise UploadError("Upload size must be an integer")
+
+            session = upload_manager.start(
+                filename=filename,
+                size=size,
+                user_id=user_id,
+                storage_key=storage_key,
+            )
+            self._send_json(201, session)
+        except Exception as exc:
+            self._upload_error(exc)
+
+    def _complete_model_upload(self, upload_id):
+        if STORAGE_MODE != "local" or upload_manager is None:
+            self._send_json(503, {"error": "resumable_uploads_require_local_mode"})
+            return
+
+        try:
+            payload, metadata = self._validate_upload_capability(upload_id)
+
+            verified = upload_manager.verify(
+                upload_id,
+                payload["uid"],
+            )
+
+            size = verified["size"]
+            chunk_size = upload_manager.chunk_size
+            chunk_count = (size + chunk_size - 1) // chunk_size
+            directory = upload_manager._directory(upload_id)
+
+            chunk_paths = [
+                os.path.join(directory, f"{index:08d}.part")
+                for index in range(chunk_count)
+            ]
+
+            manifest = storage.publish_staged_upload(
+                verified["storage_key"],
+                chunk_paths,
+                size,
+                verified["sha256"],
+            )
+
+            try:
+                upload_manager.discard(upload_id, payload["uid"])
+            except OSError:
+                pass
+
+            self._send_json(200, {
+                "success": True,
+                "upload_id": upload_id,
+                "storage_key": verified["storage_key"],
+                "size": size,
+                "sha256": verified["sha256"],
+                "published": True,
+            })
+        except Exception as exc:
+            self._upload_error(exc)
+
     def do_POST(self):
+        upload_match = __import__("re").fullmatch(
+            r"/uploads/([a-f0-9]{32})/complete",
+            urlparse(self.path).path,
+        )
+        if upload_match:
+            self._complete_model_upload(upload_match.group(1))
+            return
+
+        if self.path == "/uploads/start":
+            self._start_model_upload()
+            return
+
 
         if self.path == "/reverse-command":
             if not self._require_auth():
@@ -499,7 +686,55 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             {"error": "not_found"},
         )
 
+    def _put_upload_chunk(self, upload_id, index):
+        if STORAGE_MODE != "local" or upload_manager is None:
+            self._send_json(503, {"error": "resumable_uploads_require_local_mode"})
+            return
+
+        try:
+            payload, metadata = self._validate_upload_capability(upload_id)
+            expected = expected_chunk_length(
+                payload, index, upload_manager.chunk_size
+            )
+
+            try:
+                length = int(self.headers.get("Content-Length", "-1"))
+            except (TypeError, ValueError):
+                raise UploadError("invalid_content_length")
+
+            if length != expected:
+                self.close_connection = True
+                raise UploadError(
+                    f"Incorrect chunk Content-Length: expected {expected}"
+                )
+
+            data = self.rfile.read(length)
+            if len(data) != expected:
+                self.close_connection = True
+                raise UploadError("chunk_body_incomplete")
+
+            result = upload_manager.write_chunk(
+                upload_id,
+                payload["uid"],
+                index,
+                data,
+            )
+            self._send_json(200, result)
+        except Exception as exc:
+            self._upload_error(exc)
+
     def do_PUT(self):
+        upload_match = __import__("re").fullmatch(
+            r"/uploads/([a-f0-9]{32})/chunks/(0|[1-9][0-9]*)",
+            urlparse(self.path).path,
+        )
+        if upload_match:
+            self._put_upload_chunk(
+                upload_match.group(1),
+                int(upload_match.group(2)),
+            )
+            return
+
 
         if self.path != "/put":
 

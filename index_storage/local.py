@@ -587,6 +587,38 @@ class LocalIndexStorage(IndexStorageBackend):
             self.metrics.record_put()
 
     @_count_storage_errors
+    def put_file(self, key, file_path, expected_size=None):
+        """Publish a large file through the existing manifest/catalog path."""
+        self._ensure_open()
+        with self._lock:
+            manifest = self._large_objects.put_file(
+                key, file_path, expected_size=expected_size
+            )
+            self.catalog.put(key, manifest.to_dict())
+            self.metrics.record_put()
+            return manifest
+
+    @_count_storage_errors
+    def publish_staged_upload(
+        self, key, chunk_paths, expected_size, expected_checksum
+    ):
+        """Publish verified staged upload chunks into local storage."""
+        self._ensure_open()
+        with self._lock:
+            if self.exists(key):
+                raise FileExistsError(f"storage key already exists: {key}")
+
+            manifest = self._large_objects.put_staged_chunks(
+                key,
+                chunk_paths,
+                expected_size,
+                expected_checksum,
+            )
+            self.catalog.put(key, manifest.to_dict())
+            self.metrics.record_put()
+            return manifest
+
+    @_count_storage_errors
     def get(self, key):
         self._ensure_open()
         with self._lock:
