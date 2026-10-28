@@ -679,7 +679,7 @@
       <span class="home-nav-icon" aria-hidden="true">✦</span>
       <span>Home 1</span>
     </a>
-    <a href="/ai-studio.html" aria-label="Chat">
+    <a href="/chat.html" aria-label="Chat">
       <span class="home-nav-icon" aria-hidden="true">☏</span>
       <span>Chat</span>
     </a>
@@ -855,6 +855,15 @@
         if (viewer.classList.contains('open') && event.key === 'ArrowRight' && currentStory < stories.length - 1) openStory(currentStory + 1);
         if (viewer.classList.contains('open') && event.key === 'ArrowLeft' && currentStory > 0) openStory(currentStory - 1);
       });
+
+      // Open a conversation with only the AI the user selected.
+      window.openAIChat = function (ai) {
+        if (!ai) return;
+        const id = String(ai.id || ai.slug || ai.name || "selected-ai");
+        const name = String(ai.name || "Selected AI");
+        const params = new URLSearchParams({ ai: id, name: name });
+        window.location.href = "/chat.html?" + params.toString();
+      };
 
       updateFeed();
     })();

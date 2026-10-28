@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#07111f">
+<title>Chat — OUR SEARCH</title>
+<style>
+:root{color-scheme:dark;--bg:#07111f;--panel:#101d30;--border:#23344b;--text:#f4f8ff;--muted:#9eabc0;--cyan:#48c7ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,sans-serif}
+button,input{font:inherit}
+button,a{cursor:pointer}
+button{color:inherit}
+header{position:sticky;top:0;z-index:5;background:#07111ff2;backdrop-filter:blur(16px);border-bottom:1px solid var(--border);padding:15px 17px}
+.top{max-width:760px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{font-size:22px;font-weight:850;letter-spacing:-1px}.brand span{color:var(--cyan)}
+.icon-btn{width:42px;height:42px;border:1px solid var(--border);border-radius:50%;background:var(--panel);font-size:21px}
+main{max-width:760px;margin:auto;padding:22px 16px 110px}
+h1{font-size:30px;letter-spacing:-1px;margin:0 0 5px}
+.sub{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 22px}
+.search{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:0 14px;margin-bottom:19px}
+.search span{font-size:19px;color:var(--muted)}
+.search input{width:100%;min-width:0;background:transparent;border:0;outline:0;color:var(--text);padding:14px 0}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:5px;background:#0c1829;border:1px solid var(--border);border-radius:14px;margin-bottom:20px}
+.tab{border:0;border-radius:10px;background:transparent;padding:12px 8px;color:var(--muted);font-weight:700}
+.tab.active{background:#16364a;color:#70d7ff}
+.section-title{font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted);font-weight:800;margin:22px 0 12px}
+.list{display:flex;flex-direction:column;gap:8px}
+.item{display:flex;align-items:center;gap:12px;text-align:left;width:100%;padding:13px;background:var(--panel);border:1px solid var(--border);border-radius:14px}
+.avatar{flex:0 0 46px;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:#19354d;color:#77d9ff;font-size:20px;font-weight:800;overflow:hidden}
+.avatar img{width:100%;height:100%;object-fit:cover}
+.details{min-width:0;flex:1}
+.name{font-weight:750;overflow-wrap:anywhere}
+.handle{font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
+.arrow{font-size:20px;color:var(--muted)}
+.empty{padding:28px 18px;text-align:center;border:1px dashed #2a3b52;border-radius:15px;color:var(--muted);line-height:1.6;font-size:14px}
+.empty strong{display:block;color:var(--text);font-size:16px;margin-bottom:6px}
+.notice{margin-top:14px;border-radius:12px;padding:12px;background:#14263a;color:var(--muted);font-size:12px;line-height:1.55}
+.hidden{display:none!important}
+#conversation{position:fixed;inset:0;z-index:20;background:var(--bg);display:flex;flex-direction:column}
+.convo-head{padding:12px 15px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px}
+.back{border:0;background:transparent;font-size:27px;padding:4px 8px}
+.convo-messages{flex:1;overflow:auto;padding:18px;display:flex;flex-direction:column;gap:12px}
+.bubble{align-self:flex-start;max-width:85%;background:var(--panel);border:1px solid var(--border);border-radius:16px 16px 16px 4px;padding:13px;line-height:1.5}
+.composer{display:flex;gap:8px;padding:12px;border-top:1px solid var(--border);padding-bottom:max(12px,env(safe-area-inset-bottom))}
+.composer input{min-width:0;flex:1;border-radius:24px;border:1px solid var(--border);background:var(--panel);color:var(--text);padding:12px 15px}
+.send{border:0;border-radius:50%;width:46px;background:var(--cyan);color:#07111f;font-weight:900;font-size:19px}
+nav{position:fixed;bottom:0;left:0;right:0;z-index:10;display:flex;justify-content:space-around;background:#0a1728f5;border-top:1px solid var(--border);padding:9px 5px max(9px,env(safe-area-inset-bottom))}
+nav a{flex:1;text-align:center;text-decoration:none;color:var(--muted);font-size:11px;display:flex;flex-direction:column;gap:4px;align-items:center}
+nav a span:first-child{font-size:21px}nav a.active{color:var(--cyan)}
+@media(min-width:600px){main{padding-top:30px}.item{padding:15px}}
+</style>
+</head>
+<body>
+<header><div class="top">
+  <div class="brand">OUR <span>SEARCH</span></div>
+  <button class="icon-btn" id="newChat" aria-label="New chat">＋</button>
+</div></header>
+<main>
+  <h1>Messages</h1>
+  <p class="sub">Talk with people you know and AI you've discovered.</p>
+  <label class="search"><span>⌕</span><input id="search" type="search" placeholder="Search people or your AI chats" autocomplete="off"></label>
+  <div class="tabs" role="tablist">
+    <button class="tab active" id="peopleTab" role="tab" aria-selected="true">♙ People</button>
+    <button class="tab" id="aiTab" role="tab" aria-selected="false">✦ AI Chats</button>
+  </div>
+  <section id="peoplePanel">
+    <div class="section-title">Find people</div>
+    <div id="peopleList" class="list">
+      <div class="empty"><strong>Find your people</strong>Search by username or display name to discover profiles.</div>
+    </div>
+    <div class="notice">People search uses public OUR SEARCH profiles. Private messaging will become available when secure message storage is connected.</div>
+  </section>
+  <section id="aiPanel" class="hidden">
+    <div class="section-title">Your AI conversations</div>
+    <div id="aiList" class="list"></div>
+    <div id="aiEmpty" class="empty"><strong>Your AI chats live here</strong>Discover an AI in Home 1 and tap its Chat button. That AI will appear here; the entire AI feed won't be loaded into your chats.</div>
+    <div class="notice">This page prepares the conversation interface. A working AI response requires connecting the selected assistant to its secure runtime.</div>
+  </section>
+</main>
+<nav aria-label="Main navigation">
+  <a href="/home1.html"><span>✦</span><span>Home 1</span></a>
+  <a href="/chat.html" class="active" aria-current="page"><span>☏</span><span>Chat</span></a>
+  <a href="/home1.html#storiesRow"><span>＋</span><span>Create</span></a>
+  <a href="/profile.html"><span>♙</span><span>Profile</span></a>
+  <a href="/"><span>⌕</span><span>Home 2</span></a>
+</nav>
+<section id="conversation" class="hidden" aria-label="Conversation">
+  <div class="convo-head">
+    <button class="back" id="back" aria-label="Back to chats">‹</button>
+    <div class="avatar" id="convoAvatar">✦</div>
+    <div class="details"><div class="name" id="convoName">AI chat</div><div class="handle" id="convoType">OUR SEARCH</div></div>
+  </div>
+  <div class="convo-messages" id="messages"></div>
+  <form class="composer" id="composer">
+    <input id="messageInput" placeholder="Write a message..." autocomplete="off" aria-label="Write a message">
+    <button class="send" aria-label="Send message">➤</button>
+  </form>
+</section>
+<script type="module">
+const $=id=>document.getElementById(id);
+const params=new URLSearchParams(location.search);
+let activeTab='people', activeChat=null, profiles=[];
+const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const readChats=()=>{try{return JSON.parse(localStorage.getItem('os_ai_chats')||'[]')}catch{return []}};
+const writeChats=items=>localStorage.setItem('os_ai_chats',JSON.stringify(items));
+function setTab(tab){
+ activeTab=tab;
+ $('peopleTab').classList.toggle('active',tab==='people');
+ $('aiTab').classList.toggle('active',tab==='ai');
+ $('peopleTab').setAttribute('aria-selected',String(tab==='people'));
+ $('aiTab').setAttribute('aria-selected',String(tab==='ai'));
+ $('peoplePanel').classList.toggle('hidden',tab!=='people');
+ $('aiPanel').classList.toggle('hidden',tab!=='ai');
+ $('search').placeholder=tab==='people'?'Search people by name or username':'Search your AI conversations';
+ $('search').value='';
+ if(tab==='people') renderPeople(); else renderAI();
+}
+function renderAI(){
+ const q=$('search').value.trim().toLowerCase(), chats=readChats().filter(c=>(c.name+' '+c.id).toLowerCase().includes(q));
+ $('aiList').innerHTML=chats.map(c=>`<button class="item" data-ai="${safe(c.id)}"><span class="avatar">✦</span><span class="details"><span class="name">${safe(c.name)}</span><span class="handle">${safe(c.lastMessage||'Continue conversation')}</span></span><span class="arrow">›</span></button>`).join('');
+ $('aiEmpty').classList.toggle('hidden',chats.length>0);
+ $('aiList').querySelectorAll('[data-ai]').forEach(b=>b.addEventListener('click',()=>openAI(b.dataset.ai)));
+}
+function renderPeople(){
+ const q=$('search').value.trim().toLowerCase();
+ const found=profiles.filter(p=>(p.username+' '+p.display_name).toLowerCase().includes(q));
+ $('peopleList').innerHTML=found.length?found.map(p=>`<button class="item" data-person="${safe(p.user_id)}"><span class="avatar">${p.avatar_url?`<img src="${safe(p.avatar_url)}" alt="">`:safe((p.display_name||p.username||'U')[0].toUpperCase())}</span><span class="details"><span class="name">${safe(p.display_name||p.username)}</span><span class="handle">@${safe(p.username)}</span></span><span class="arrow">›</span></button>`).join(''):`<div class="empty"><strong>${q?'No people found':'Find your people'}</strong>${q?'Try another name or username.':'Search by username or display name.'}</div>`;
+ $('peopleList').querySelectorAll('[data-person]').forEach(b=>b.addEventListener('click',()=>openPerson(b.dataset.person)));
+}
+function openAI(id){
+ const c=readChats().find(x=>x.id===id);if(!c)return;
+ activeChat={type:'ai',id:c.id,name:c.name};
+ $('convoName').textContent=c.name;$('convoType').textContent='AI ASSISTANT';
+ $('convoAvatar').textContent='✦';showConversation(c.messages||[],`You selected ${c.name}. The chat interface is ready, but this assistant has not yet been connected to a working AI runtime.`);
+}
+function openPerson(id){
+ const p=profiles.find(x=>x.user_id===id);if(!p)return;
+ activeChat={type:'person',id:p.user_id,name:p.display_name||p.username};
+ $('convoName').textContent=activeChat.name;$('convoType').textContent='@'+p.username;
+ $('convoAvatar').textContent=(activeChat.name[0]||'U').toUpperCase();
+ showConversation([],`You opened @${p.username}. Secure private messaging has not been connected yet, so messages cannot be delivered.`);
+}
+function showConversation(items,intro){
+ $('messages').innerHTML=`<div class="bubble">${safe(intro)}</div>`+(items||[]).map(m=>`<div class="bubble">${safe(m.text)}</div>`).join('');
+ $('conversation').classList.remove('hidden');$('messageInput').placeholder=activeChat?.type==='ai'?'Message this AI (runtime not connected)':'Message this person (messaging not connected)';
+ $('messageInput').focus();
+}
+$('back').addEventListener('click',()=>{$('conversation').classList.add('hidden');activeChat=null;});
+$('peopleTab').addEventListener('click',()=>setTab('people'));
+$('aiTab').addEventListener('click',()=>setTab('ai'));
+$('search').addEventListener('input',()=>activeTab==='people'?renderPeople():renderAI());
+$('newChat').addEventListener('click',()=>setTab('people'));
+$('composer').addEventListener('submit',e=>{e.preventDefault();$('messageInput').value='';});
+const aiId=params.get('ai'), aiName=params.get('name');
+if(aiId){
+ const chats=readChats();let c=chats.find(x=>x.id===aiId);
+ if(!c){c={id:aiId,name:aiName||'Selected AI',messages:[]};chats.unshift(c);writeChats(chats);}
+ setTab('ai');openAI(aiId);
+}else setTab('people');
+try{
+ const config=await fetch('/profiles_setup.sql',{method:'HEAD'}).catch(()=>null);
+ // Profile search is enabled below only when the public Supabase config is supplied.
+ const response=await fetch('/profile.html');
+ if(response.ok){
+  const html=await response.text();
+  const url=html.match(/SUPABASE_URL\s*=\s*['"]([^'"]+)/);
+  const key=html.match(/SUPABASE_ANON_KEY\s*=\s*['"]([^'"]+)/);
+  if(url&&key){
+   const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2');
+   const supabase=createClient(url[1],key[1]);
+   const {data}=await supabase.from('profiles').select('user_id,username,display_name,avatar_url').limit(100);
+   profiles=data||[];renderPeople();
+  }
+ }
+}catch(e){console.warn('Profile search unavailable until configured.',e);}
+</script>
+</body>
+</html>
