@@ -232,18 +232,26 @@ $('submissionForm').addEventListener('submit', async event => {
   try {
     if (isModel) {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      storagePath = `${currentUser.id}/${crypto.randomUUID()}-${safeName}`;
-      status('Uploading model file to private storage…');
+      storagePath = `ai-models/${currentUser.id}/${crypto.randomUUID()}-${safeName}`;
+      status(`Uploading ${file.name} to your phone storage…`);
 
-      const { error: uploadError } = await supabase.storage
-        .from(BUCKET)
-        .upload(storagePath, file, {
-          upsert: false,
-          contentType: file.type || 'application/octet-stream'
-        });
-      if (uploadError) throw new Error(
-        `Model upload failed: ${uploadError.message}. Check that the private "${BUCKET}" bucket and its upload policies are configured.`
-      );
+      const { data: authData, error: authError } = await supabase.auth.getSession();
+      if (authError || !authData.session?.access_token) {
+        throw new Error('Please sign in again before uploading.');
+      }
+      const response = await fetch('/model-upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Authorization': `Bearer ${authData.session.access_token}`,
+          'X-Model-Storage-Key': storagePath
+        },
+        body: file
+      });
+
+      if (!response.ok) {
+        throw new Error(`Phone storage upload failed (${response.status}). Check that the OUR SEARCH storage app is running.`);
+      }
     }
 
     status('Saving your submission…');

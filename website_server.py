@@ -304,6 +304,97 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
     # POST
     # --------------------------------------------------------
 
+
+    def handle_model_upload(self):
+        import http.client
+        import re
+        from urllib.request import Request, urlopen
+
+        api_key = os.environ.get("OUR_SEARCH_STORAGE_API_KEY", "")
+        if not api_key:
+            self.send_json(500, {"error": "storage_not_configured"})
+            return
+
+        auth = self.headers.get("Authorization", "")
+        if not auth.startswith("Bearer "):
+            self.send_json(401, {"error": "sign_in_required"})
+            return
+
+        try:
+            request = Request(
+                "https://rxhyxmfayalrjmicsomm.supabase.co/auth/v1/user",
+                headers={
+                    "apikey": "sb_publishable_3bKiIeuQq_yVrNK59Bk96A_9Y31q8hI",
+                    "Authorization": auth,
+                },
+            )
+            with urlopen(request, timeout=15) as response:
+                user = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            self.send_json(401, {"error": "session_invalid"})
+            return
+
+        user_id = str(user.get("id", ""))
+        storage_key = self.headers.get("X-Model-Storage-Key", "")
+        if (
+            not user_id
+            or not storage_key.startswith("ai-models/" + user_id + "/")
+            or ".." in storage_key
+            or not re.fullmatch(r"[A-Za-z0-9._/-]+", storage_key)
+        ):
+            self.send_json(400, {"error": "invalid_storage_key"})
+            return
+
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            length = 0
+        if length <= 0:
+            self.send_json(400, {"error": "empty_upload"})
+            return
+
+        connection = None
+        try:
+            connection = http.client.HTTPSConnection(
+                "my-platform-9.onrender.com", timeout=600
+            )
+            connection.putrequest("PUT", "/put")
+            connection.putheader("Content-Type", "application/octet-stream")
+            connection.putheader("Content-Length", str(length))
+            connection.putheader("X-Storage-API-Key", api_key)
+            connection.putheader("X-Storage-Key", storage_key)
+            connection.endheaders()
+
+            remaining = length
+            while remaining:
+                chunk = self.rfile.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    raise ConnectionError("Upload ended before all bytes arrived")
+                connection.send(chunk)
+                remaining -= len(chunk)
+
+            result = connection.getresponse()
+            response_body = result.read(4096)
+            if result.status < 200 or result.status >= 300:
+                self.send_json(
+                    502,
+                    {
+                        "error": "storage_upload_failed",
+                        "storage_status": result.status,
+                    },
+                )
+                return
+
+            self.send_json(
+                200,
+                {"stored": True, "key": storage_key, "size": length},
+            )
+        except Exception:
+            self.send_json(502, {"error": "storage_connection_failed"})
+        finally:
+            if connection:
+                connection.close()
+
     def do_POST(self):
 
         parsed = urlparse(
@@ -311,6 +402,10 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         )
 
         path = parsed.path
+
+        if path == "/model-upload":
+            self.handle_model_upload()
+            return
 
         allowed_paths = (
             "/search",
