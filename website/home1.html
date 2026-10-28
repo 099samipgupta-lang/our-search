@@ -665,6 +665,12 @@
     </div>
 
     <section class="ai-feed" id="aiFeed" aria-label="Discover AI feed">
+      <article class="ai-card" data-saved="false" style="padding:20px;margin:12px 0;border:1px solid #23344b;border-radius:18px;background:#101d30;color:#f4f8ff">
+        <div style="font-size:12px;letter-spacing:1px;color:#48c7ff;font-weight:800">YOUR ON-DEVICE AI</div>
+        <h2 style="margin:10px 0">My Qwen AI</h2>
+        <p style="color:#9eabc0;line-height:1.5">Chat with your Qwen 3 0.6B model running on this phone.</p>
+        <button id="openQwenChat" type="button" style="padding:11px 18px;border:0;border-radius:12px;background:#48c7ff;color:#07111f;font-weight:800">Chat with my AI</button>
+      </article>
     </section>
 
     <div class="empty-state" id="emptyState">
@@ -864,6 +870,13 @@
         const params = new URLSearchParams({ ai: id, name: name });
         window.location.href = "/chat.html?" + params.toString();
       };
+
+      const openQwenButton = document.getElementById('openQwenChat');
+      if (openQwenButton) {
+        openQwenButton.addEventListener('click', () => {
+          window.openAIChat({id: 'local-qwen-0.6b', name: 'My Qwen AI'});
+        });
+      }
 
       updateFeed();
     })();
