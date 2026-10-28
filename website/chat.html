@@ -132,8 +132,9 @@ function renderPeople(){
 function openAI(id){
  const c=readChats().find(x=>x.id===id);if(!c)return;
  activeChat={type:'ai',id:c.id,name:c.name};
- $('convoName').textContent=c.name;$('convoType').textContent='AI ASSISTANT';
- $('convoAvatar').textContent='✦';showConversation(c.messages||[],`You selected ${c.name}. The chat interface is ready, but this assistant has not yet been connected to a working AI runtime.`);
+ $('convoName').textContent=c.name;$('convoType').textContent='ON-DEVICE QWEN AI';
+ $('convoAvatar').textContent='✦';
+ showConversation(c.messages||[],'Local Qwen is connected through your phone. Send a message to start chatting.');
 }
 function openPerson(id){
  const p=profiles.find(x=>x.user_id===id);if(!p)return;
@@ -144,15 +145,61 @@ function openPerson(id){
 }
 function showConversation(items,intro){
  $('messages').innerHTML=`<div class="bubble">${safe(intro)}</div>`+(items||[]).map(m=>`<div class="bubble">${safe(m.text)}</div>`).join('');
- $('conversation').classList.remove('hidden');$('messageInput').placeholder=activeChat?.type==='ai'?'Message this AI (runtime not connected)':'Message this person (messaging not connected)';
+ $('conversation').classList.remove('hidden');
+ $('messageInput').placeholder=activeChat?.type==='ai'?'Message your local Qwen AI':'Message this person (messaging not connected)';
  $('messageInput').focus();
+ $('messages').scrollTop=$('messages').scrollHeight;
 }
 $('back').addEventListener('click',()=>{$('conversation').classList.add('hidden');activeChat=null;});
 $('peopleTab').addEventListener('click',()=>setTab('people'));
 $('aiTab').addEventListener('click',()=>setTab('ai'));
 $('search').addEventListener('input',()=>activeTab==='people'?renderPeople():renderAI());
 $('newChat').addEventListener('click',()=>setTab('people'));
-$('composer').addEventListener('submit',e=>{e.preventDefault();$('messageInput').value='';});
+$('composer').addEventListener('submit',async e=>{
+ e.preventDefault();
+ const input=$('messageInput'), text=input.value.trim();
+ if(!text||!activeChat)return;
+ if(activeChat.type!=='ai'){input.value='';return;}
+ const chats=readChats(), c=chats.find(x=>x.id===activeChat.id);
+ if(!c)return;
+ c.messages=c.messages||[];
+ c.messages.push({role:'user',text});
+ input.value='';
+ $('messages').innerHTML+=`<div class="bubble">${safe(text)}</div>`;
+ $('messages').scrollTop=$('messages').scrollHeight;
+ const send=$('composer').querySelector('button');
+ send.disabled=true;
+ const waiting=document.createElement('div');
+ waiting.className='bubble';waiting.textContent='Qwen is thinking…';
+ $('messages').appendChild(waiting);
+ try{
+  const response=await fetch('http://127.0.0.1:8082/v1/chat/completions',{
+   method:'POST',
+   headers:{'Content-Type':'application/json'},
+   body:JSON.stringify({
+    model:'local-qwen',
+    messages:c.messages.map(m=>({role:m.role||'assistant',content:m.text})),
+    stream:false
+   })
+  });
+  if(!response.ok)throw new Error('Local AI server returned HTTP '+response.status);
+  const data=await response.json();
+  const answer=data.choices?.[0]?.message?.content;
+  if(!answer)throw new Error('The AI server returned no reply.');
+  c.messages.push({role:'assistant',text:answer});
+  waiting.remove();
+  $('messages').innerHTML+=`<div class="bubble">${safe(answer)}</div>`;
+  writeChats(chats);
+ }catch(err){
+  waiting.textContent='Could not reach local Qwen: '+err.message+'. Keep the Qwen server running on this phone and allow the browser to connect to localhost.';
+  c.messages.pop();
+  writeChats(chats);
+ }finally{
+  send.disabled=false;
+  $('messages').scrollTop=$('messages').scrollHeight;
+  input.focus();
+ }
+});
 const aiId=params.get('ai'), aiName=params.get('name');
 if(aiId){
  const chats=readChats();let c=chats.find(x=>x.id===aiId);
