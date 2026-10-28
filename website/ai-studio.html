@@ -254,7 +254,7 @@ $('submissionForm').addEventListener('submit', async event => {
 
       const startData = await startResponse.json().catch(() => ({}));
       if (!startResponse.ok) {
-        throw new Error(startData.error || `Could not start upload (${startResponse.status}).`);
+        throw new Error(`${startData.error || 'Could not start upload'} (HTTP ${startResponse.status}${startData.storage_status ? `, Storage HTTP ${startData.storage_status}` : ''})`);
       }
 
       const { upload_id, upload_token, upload_url, chunk_size, chunks_received } = startData;
