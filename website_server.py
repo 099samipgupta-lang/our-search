@@ -1,3 +1,4 @@
+import base64
 import html
 import json
 import os
@@ -526,6 +527,50 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
         if path == "/model-upload":
             self.handle_model_upload()
+            return
+
+        if path == "/ai/chat":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if length <= 0 or length > 100_000:
+                    raise ValueError("Invalid request size")
+
+                payload = json.loads(self.rfile.read(length).decode("utf-8"))
+                messages = payload.get("messages", [])
+
+                if not isinstance(messages, list) or not messages:
+                    raise ValueError("Chat messages are required")
+
+                prompt_parts = []
+                for message in messages[-20:]:
+                    if not isinstance(message, dict):
+                        continue
+                    role = str(message.get("role", "user"))
+                    content = str(message.get("text", message.get("content", "")))
+                    if content:
+                        prompt_parts.append(f"{role.capitalize()}: {content}")
+
+                prompt = "\\n".join(prompt_parts) + "\\nAssistant:"
+                if not prompt_parts:
+                    raise ValueError("No usable chat messages")
+
+                max_tokens = max(1, min(int(payload.get("max_tokens", 128)), 256))
+                encoded = base64.b64encode(prompt.encode("utf-8")).decode("ascii")
+
+                result = storage._command(f"AI {encoded} {max_tokens}")
+
+                if not result.startswith("AI_RESULT:"):
+                    self.send_json(502, {"error": result or "Qwen returned no response"})
+                    return
+
+                answer = base64.b64decode(
+                    result[len("AI_RESULT:"):],
+                    validate=True
+                ).decode("utf-8")
+
+                self.send_json(200, {"response": answer})
+            except Exception as error:
+                self.send_json(502, {"error": str(error)})
             return
 
         allowed_paths = (

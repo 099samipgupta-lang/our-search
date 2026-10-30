@@ -173,18 +173,17 @@ $('composer').addEventListener('submit',async e=>{
  waiting.className='bubble';waiting.textContent='Qwen is thinking…';
  $('messages').appendChild(waiting);
  try{
-  const response=await fetch('http://127.0.0.1:8082/v1/chat/completions',{
+  const response=await fetch('/ai/chat',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({
-    model:'local-qwen',
-    messages:c.messages.map(m=>({role:m.role||'assistant',content:m.text})),
-    stream:false
+    messages:c.messages.map(m=>({role:m.role||'user',text:m.text})),
+    max_tokens:128
    })
   });
-  if(!response.ok)throw new Error('Local AI server returned HTTP '+response.status);
   const data=await response.json();
-  const answer=data.choices?.[0]?.message?.content;
+  if(!response.ok)throw new Error(data.error||'AI server returned HTTP '+response.status);
+  const answer=data.response;
   if(!answer)throw new Error('The AI server returned no reply.');
   c.messages.push({role:'assistant',text:answer});
   waiting.remove();
