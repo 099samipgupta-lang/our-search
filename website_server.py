@@ -3,6 +3,7 @@ import html
 import json
 import os
 import traceback
+import threading
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 from urllib.request import urlopen
@@ -46,20 +47,52 @@ storage_repository = IndexStorageRepository(
     storage
 )
 
-indexing_pipeline = CrawlIndexPipeline(
-    root=INDEX_ROOT,
-    storage=storage,
-    storage_repository=storage_repository,
-)
+indexing_pipeline = None
 
-search_index = indexing_pipeline.search_index
-document_store = indexing_pipeline.document_store
 
-search_service = SearchService(
-    search_index,
-    document_store,
-    indexing_pipeline=indexing_pipeline,
-)
+class LazySearchService:
+    def __init__(self):
+        self._service = None
+        self._lock = threading.Lock()
+
+    def _get_service(self):
+        global indexing_pipeline
+
+        if self._service is None:
+            with self._lock:
+                if self._service is None:
+                    pipeline = CrawlIndexPipeline(
+                        root=INDEX_ROOT,
+                        storage=storage,
+                        storage_repository=storage_repository,
+                    )
+
+                    try:
+                        service = SearchService(
+                            pipeline.search_index,
+                            pipeline.document_store,
+                            indexing_pipeline=pipeline,
+                        )
+                    except Exception:
+                        pipeline.close()
+                        raise
+
+                    indexing_pipeline = pipeline
+                    self._service = service
+
+        return self._service
+
+    def health(self):
+        return {
+            "status": "ok",
+            "service": "search_service",
+        }
+
+    def __getattr__(self, name):
+        return getattr(self._get_service(), name)
+
+
+search_service = LazySearchService()
 
 
 # ------------------------------------------------------------
@@ -1414,4 +1447,5 @@ finally:
 
         server.server_close()
 
-    indexing_pipeline.close()
+    if indexing_pipeline is not None:
+        indexing_pipeline.close()
