@@ -583,7 +583,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                     if content:
                         prompt_parts.append(f"{role.capitalize()}: {content}")
 
-                prompt = "\\n".join(prompt_parts) + "\\nAssistant:"
+                prompt = "\n".join(prompt_parts) + "\nAssistant:"
                 if not prompt_parts:
                     raise ValueError("No usable chat messages")
 
