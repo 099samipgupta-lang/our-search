@@ -578,12 +578,16 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                 for message in messages[-20:]:
                     if not isinstance(message, dict):
                         continue
-                    role = str(message.get("role", "user"))
+                    role = str(message.get("role", "user")).lower()
+                    if role not in ("system", "user", "assistant"):
+                        continue
                     content = str(message.get("text", message.get("content", "")))
                     if content:
-                        prompt_parts.append(f"{role.capitalize()}: {content}")
+                        prompt_parts.append(
+                            f"<|im_start|>{role}\n{content}<|im_end|>"
+                        )
 
-                prompt = "\n".join(prompt_parts) + "\nAssistant:"
+                prompt = "\n".join(prompt_parts) + "\n<|im_start|>assistant\n"
                 if not prompt_parts:
                     raise ValueError("No usable chat messages")
 
