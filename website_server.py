@@ -582,6 +582,8 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                     if role not in ("system", "user", "assistant"):
                         continue
                     content = str(message.get("text", message.get("content", "")))
+                    if role == "user":
+                        content = content.rstrip() + " /no_think"
                     if content:
                         prompt_parts.append(
                             f"<|im_start|>{role}\n{content}<|im_end|>"
