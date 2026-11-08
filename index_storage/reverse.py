@@ -15,7 +15,7 @@ class ReverseIndexStorage(IndexStorageBackend):
         self,
         command_url,
         api_key,
-        timeout=35,
+        timeout=180,
     ):
 
         if not isinstance(command_url, str):

@@ -178,12 +178,14 @@ $('composer').addEventListener('submit',async e=>{
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({
     messages:c.messages.map(m=>({role:m.role||'user',text:m.text})),
-    max_tokens:128
+    max_tokens:192
    })
   });
   const data=await response.json();
   if(!response.ok)throw new Error(data.error||'AI server returned HTTP '+response.status);
-  const answer=data.response;
+  const answer=(data.response||'')
+   .replace(/<think>[\s\S]*?<\/think>/gi,'')
+   .trim();
   if(!answer)throw new Error('The AI server returned no reply.');
   c.messages.push({role:'assistant',text:answer});
   waiting.remove();

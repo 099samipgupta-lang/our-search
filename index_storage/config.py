@@ -69,7 +69,7 @@ def create_index_storage():
         timeout = int(
             os.environ.get(
                 "OUR_SEARCH_STORAGE_TIMEOUT",
-                "35",
+                "180",
             )
         )
 
