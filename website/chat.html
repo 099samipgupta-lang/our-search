@@ -145,9 +145,15 @@ function setTab(tab){
  if(tab==='people') renderPeople(); else renderAI();
 }
 function renderAI(){
- const q=$('search').value.trim().toLowerCase(), chats=readChats().filter(c=>(c.name+' '+c.id).toLowerCase().includes(q));
- $('aiList').innerHTML=chats.map(c=>`<button class="item" data-ai="${safe(c.id)}"><span class="avatar">✦</span><span class="details"><span class="name">${safe(c.name)}</span><span class="handle">${safe(c.lastMessage||'Continue conversation')}</span></span><span class="arrow">›</span></button>`).join('');
- $('aiEmpty').classList.toggle('hidden',chats.length>0);
+ const q=$('search').value.trim().toLowerCase();
+ const chats=readChats(), groups=[], seen=new Set();
+ chats.forEach(c=>{
+  const id=c.aiId||c.id;
+  if(!seen.has(id)){seen.add(id);groups.push({id,name:c.name||'AI chat'});}
+ });
+ const found=groups.filter(c=>(c.name+' '+c.id).toLowerCase().includes(q));
+ $('aiList').innerHTML=found.map(c=>`<button class="item" data-ai="${safe(c.id)}"><span class="avatar">✦</span><span class="details"><span class="name">${safe(c.name)}</span><span class="handle">Start a new conversation</span></span><span class="arrow">›</span></button>`).join('');
+ $('aiEmpty').classList.toggle('hidden',found.length>0);
  $('aiList').querySelectorAll('[data-ai]').forEach(b=>b.addEventListener('click',()=>openAI(b.dataset.ai)));
 }
 function renderHistory(){
@@ -159,7 +165,7 @@ function renderHistory(){
  $('historyEmpty').classList.toggle('hidden',chats.length>0);
  $('historyList').querySelectorAll('[data-history]').forEach(b=>b.addEventListener('click',()=>{
   closeHistory();
-  openAI(b.dataset.history);
+  openAI(null,b.dataset.history);
  }));
 }
 function openHistory(){
@@ -179,11 +185,34 @@ function renderPeople(){
  $('peopleList').innerHTML=found.length?found.map(p=>`<button class="item" data-person="${safe(p.user_id)}"><span class="avatar">${p.avatar_url?`<img src="${safe(p.avatar_url)}" alt="">`:safe((p.display_name||p.username||'U')[0].toUpperCase())}</span><span class="details"><span class="name">${safe(p.display_name||p.username)}</span><span class="handle">@${safe(p.username)}</span></span><span class="arrow">›</span></button>`).join(''):`<div class="empty"><strong>${q?'No people found':'Find your people'}</strong>${q?'Try another name or username.':'Search by username or display name.'}</div>`;
  $('peopleList').querySelectorAll('[data-person]').forEach(b=>b.addEventListener('click',()=>openPerson(b.dataset.person)));
 }
-function openAI(id){
+function makeConversationId(){
+ return 'chat-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,9);
+}
+function openAI(aiId,historyId=null,requestedName=''){
  $('historyToggle').classList.remove('hidden');
- const c=readChats().find(x=>x.id===id);if(!c)return;
- activeChat={type:'ai',id:c.id,name:c.name};
- $('convoName').textContent=c.name;$('convoType').textContent='ON-DEVICE QWEN AI';
+ let chats=readChats(), c=null;
+
+ if(historyId){
+  c=chats.find(x=>x.id===historyId);
+  if(!c)return;
+  if(!c.aiId){c.aiId=c.id;writeChats(chats);}
+  aiId=c.aiId;
+ }else{
+  let previous=chats.find(x=>x.id===aiId&&!x.aiId);
+  if(previous){
+   previous.aiId=aiId;
+   previous.id=makeConversationId();
+   writeChats(chats);
+  }
+  const name=requestedName||chats.find(x=>(x.aiId||x.id)===aiId)?.name||'Selected AI';
+  c={id:makeConversationId(),aiId,name,messages:[]};
+  chats.unshift(c);
+  writeChats(chats);
+ }
+
+ activeChat={type:'ai',id:c.id,aiId:c.aiId||aiId,name:c.name};
+ $('convoName').textContent=c.name;
+ $('convoType').textContent='ON-DEVICE QWEN AI';
  $('convoAvatar').textContent='✦';
  showConversation(c.messages||[],'Local Qwen is connected through your phone. Send a message to start chatting.');
 }
@@ -260,9 +289,7 @@ $('composer').addEventListener('submit',async e=>{
 });
 const aiId=params.get('ai'), aiName=params.get('name');
 if(aiId){
- const chats=readChats();let c=chats.find(x=>x.id===aiId);
- if(!c){c={id:aiId,name:aiName||'Selected AI',messages:[]};chats.unshift(c);writeChats(chats);}
- setTab('ai');openAI(aiId);
+ setTab('ai');openAI(aiId,null,aiName||'Selected AI');
 }else setTab('people');
 try{
  const config=await fetch('/profiles_setup.sql',{method:'HEAD'}).catch(()=>null);
