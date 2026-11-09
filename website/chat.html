@@ -16,6 +16,18 @@ header{position:sticky;top:0;z-index:5;background:#07111ff2;backdrop-filter:blur
 .top{max-width:760px;margin:auto;display:flex;align-items:center;justify-content:space-between;gap:12px}
 .brand{font-size:22px;font-weight:850;letter-spacing:-1px}.brand span{color:var(--cyan)}
 .icon-btn{width:42px;height:42px;border:1px solid var(--border);border-radius:50%;background:var(--panel);font-size:21px}
+.history-btn{width:44px;height:42px;border:0;background:transparent;display:grid;place-items:center;padding:7px}
+.history-btn svg{width:27px;height:27px;display:block}
+.history-backdrop{position:fixed;inset:0;z-index:30;background:#0009}
+.history-drawer{position:fixed;z-index:31;top:0;bottom:0;left:0;width:min(340px,86vw);background:var(--panel);border-right:1px solid var(--border);padding:18px 14px;display:flex;flex-direction:column;gap:14px;box-shadow:12px 0 35px #0006}
+.history-drawer-head{display:flex;align-items:center;justify-content:space-between;font-size:19px;font-weight:800}
+.history-close{border:0;background:transparent;font-size:27px;padding:3px 9px}
+.history-new{width:100%;text-align:left;padding:12px;border:1px solid var(--border);border-radius:12px;background:#16364a;color:#70d7ff;font-weight:750}
+.history-list{display:flex;flex-direction:column;gap:7px;overflow:auto}
+.history-item{width:100%;text-align:left;padding:12px;border:1px solid transparent;border-radius:11px;background:transparent;color:var(--text)}
+.history-item:active{background:#1b3048}
+.history-item strong,.history-item span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.history-item span{font-size:12px;color:var(--muted);margin-top:4px}
 main{max-width:760px;margin:auto;padding:22px 16px 110px}
 h1{font-size:30px;letter-spacing:-1px;margin:0 0 5px}
 .sub{color:var(--muted);font-size:14px;line-height:1.5;margin:0 0 22px}
@@ -54,9 +66,23 @@ nav a span:first-child{font-size:21px}nav a.active{color:var(--cyan)}
 </head>
 <body>
 <header><div class="top">
-  <div class="brand">OUR <span>SEARCH</span></div>
+  <button class="history-btn" id="historyToggle" aria-label="View chat history" title="Chat history">
+    <svg viewBox="0 0 28 28" aria-hidden="true">
+      <path d="M4 9 H24 M4 17 H17" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+    </svg>
+  </button>
   <button class="icon-btn" id="newChat" aria-label="New chat">＋</button>
 </div></header>
+<div id="historyBackdrop" class="history-backdrop hidden"></div>
+<aside id="historyDrawer" class="history-drawer hidden" aria-label="Chat history" aria-hidden="true">
+  <div class="history-drawer-head">
+    <span>Chat history</span>
+    <button class="history-close" id="closeHistory" aria-label="Close history">×</button>
+  </div>
+  <button class="history-new" id="historyNewChat">＋ New chat</button>
+  <div id="historyList" class="history-list"></div>
+  <div id="historyEmpty" class="empty"><strong>No conversations yet</strong>Your AI conversations will appear here.</div>
+</aside>
 <main>
   <h1>Messages</h1>
   <p class="sub">Talk with people you know and AI you've discovered.</p>
@@ -123,6 +149,29 @@ function renderAI(){
  $('aiEmpty').classList.toggle('hidden',chats.length>0);
  $('aiList').querySelectorAll('[data-ai]').forEach(b=>b.addEventListener('click',()=>openAI(b.dataset.ai)));
 }
+function renderHistory(){
+ const chats=readChats();
+ $('historyList').innerHTML=chats.map(c=>{
+  const last=c.messages&&c.messages.length?c.messages[c.messages.length-1].text:c.lastMessage||'Continue conversation';
+  return `<button class="history-item" data-history="${safe(c.id)}"><strong>${safe(c.name||'AI chat')}</strong><span>${safe(last)}</span></button>`;
+ }).join('');
+ $('historyEmpty').classList.toggle('hidden',chats.length>0);
+ $('historyList').querySelectorAll('[data-history]').forEach(b=>b.addEventListener('click',()=>{
+  closeHistory();
+  openAI(b.dataset.history);
+ }));
+}
+function openHistory(){
+ renderHistory();
+ $('historyDrawer').classList.remove('hidden');
+ $('historyBackdrop').classList.remove('hidden');
+ $('historyDrawer').setAttribute('aria-hidden','false');
+}
+function closeHistory(){
+ $('historyDrawer').classList.add('hidden');
+ $('historyBackdrop').classList.add('hidden');
+ $('historyDrawer').setAttribute('aria-hidden','true');
+}
 function renderPeople(){
  const q=$('search').value.trim().toLowerCase();
  const found=profiles.filter(p=>(p.username+' '+p.display_name).toLowerCase().includes(q));
@@ -155,6 +204,11 @@ $('peopleTab').addEventListener('click',()=>setTab('people'));
 $('aiTab').addEventListener('click',()=>setTab('ai'));
 $('search').addEventListener('input',()=>activeTab==='people'?renderPeople():renderAI());
 $('newChat').addEventListener('click',()=>setTab('people'));
+$('historyToggle').addEventListener('click',openHistory);
+$('closeHistory').addEventListener('click',closeHistory);
+$('historyBackdrop').addEventListener('click',closeHistory);
+$('historyNewChat').addEventListener('click',()=>{closeHistory();setTab('people');});
+
 $('composer').addEventListener('submit',async e=>{
  e.preventDefault();
  const input=$('messageInput'), text=input.value.trim();
