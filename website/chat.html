@@ -66,23 +66,8 @@ nav a span:first-child{font-size:21px}nav a.active{color:var(--cyan)}
 </head>
 <body>
 <header><div class="top">
-  <button class="history-btn" id="historyToggle" aria-label="View chat history" title="Chat history">
-    <svg viewBox="0 0 28 28" aria-hidden="true">
-      <path d="M4 9 H24 M4 17 H17" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/>
-    </svg>
-  </button>
   <button class="icon-btn" id="newChat" aria-label="New chat">＋</button>
 </div></header>
-<div id="historyBackdrop" class="history-backdrop hidden"></div>
-<aside id="historyDrawer" class="history-drawer hidden" aria-label="Chat history" aria-hidden="true">
-  <div class="history-drawer-head">
-    <span>Chat history</span>
-    <button class="history-close" id="closeHistory" aria-label="Close history">×</button>
-  </div>
-  <button class="history-new" id="historyNewChat">＋ New chat</button>
-  <div id="historyList" class="history-list"></div>
-  <div id="historyEmpty" class="empty"><strong>No conversations yet</strong>Your AI conversations will appear here.</div>
-</aside>
 <main>
   <h1>Messages</h1>
   <p class="sub">Talk with people you know and AI you've discovered.</p>
@@ -113,7 +98,23 @@ nav a span:first-child{font-size:21px}nav a.active{color:var(--cyan)}
   <a href="/"><span>⌕</span><span>Home 2</span></a>
 </nav>
 <section id="conversation" class="hidden" aria-label="Conversation">
+<div id="historyBackdrop" class="history-backdrop hidden"></div>
+<aside id="historyDrawer" class="history-drawer hidden" aria-label="Chat history" aria-hidden="true">
+  <div class="history-drawer-head">
+    <span>Chat history</span>
+    <button class="history-close" id="closeHistory" aria-label="Close history">×</button>
+  </div>
+  <button class="history-new" id="historyNewChat">＋ New chat</button>
+  <div id="historyList" class="history-list"></div>
+  <div id="historyEmpty" class="empty"><strong>No conversations yet</strong>Your AI conversations will appear here.</div>
+</aside>
+
   <div class="convo-head">
+    <button class="history-btn hidden" id="historyToggle" aria-label="View AI chat history" title="Chat history">
+      <svg viewBox="0 0 28 28" aria-hidden="true">
+        <path d="M4 9 H24 M4 17 H17" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+      </svg>
+    </button>
     <button class="back" id="back" aria-label="Back to chats">‹</button>
     <div class="avatar" id="convoAvatar">✦</div>
     <div class="details"><div class="name" id="convoName">AI chat</div><div class="handle" id="convoType">OUR SEARCH</div></div>
@@ -179,6 +180,7 @@ function renderPeople(){
  $('peopleList').querySelectorAll('[data-person]').forEach(b=>b.addEventListener('click',()=>openPerson(b.dataset.person)));
 }
 function openAI(id){
+ $('historyToggle').classList.remove('hidden');
  const c=readChats().find(x=>x.id===id);if(!c)return;
  activeChat={type:'ai',id:c.id,name:c.name};
  $('convoName').textContent=c.name;$('convoType').textContent='ON-DEVICE QWEN AI';
@@ -186,6 +188,7 @@ function openAI(id){
  showConversation(c.messages||[],'Local Qwen is connected through your phone. Send a message to start chatting.');
 }
 function openPerson(id){
+ closeHistory();$('historyToggle').classList.add('hidden');
  const p=profiles.find(x=>x.user_id===id);if(!p)return;
  activeChat={type:'person',id:p.user_id,name:p.display_name||p.username};
  $('convoName').textContent=activeChat.name;$('convoType').textContent='@'+p.username;
