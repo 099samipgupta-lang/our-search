@@ -484,6 +484,130 @@
       line-height: 1.6;
     }
 
+
+    /* AI Store listing and details */
+    .ai-store-card {
+      padding: 17px;
+      margin: 13px 0;
+      border: 1px solid var(--feed-border);
+      border-radius: 19px;
+      background: linear-gradient(145deg,#13243a,#101b2c);
+    }
+    .store-main {
+      display:flex;
+      width:100%;
+      align-items:center;
+      gap:13px;
+      padding:0;
+      text-align:left;
+      color:inherit;
+      border:0;
+      background:transparent;
+    }
+    .store-icon {
+      display:grid;
+      flex:0 0 62px;
+      width:62px;
+      height:62px;
+      place-items:center;
+      border-radius:17px;
+      font-size:29px;
+      font-weight:900;
+    }
+    .qwen-icon {
+      color:#eaf7ff;
+      background:linear-gradient(145deg,#287ac1,#153a72 65%,#101d39);
+      border:1px solid rgba(104,190,255,.4);
+      box-shadow:0 5px 22px rgba(28,116,204,.2);
+    }
+    .store-info { display:flex; flex:1; min-width:0; flex-direction:column; gap:5px; }
+    .store-info strong { font-size:16px; }
+    .store-info span { color:var(--feed-muted); font-size:11px; }
+    .store-info .store-rating { color:#c3d0e2; }
+    .store-rating i { padding:0 4px; color:#71839c; font-style:normal; }
+    .store-arrow { color:#9eabc0; font-size:27px; }
+    .store-description { margin:15px 0 12px; color:#c0ccdc; font-size:13px; line-height:1.55; }
+    .store-meta { display:flex; flex-wrap:wrap; gap:8px; }
+    .store-meta span { padding:6px 9px; border-radius:8px; background:#1a2b42; color:#b9c9dc; font-size:10px; }
+    .store-actions { display:flex; justify-content:space-between; align-items:center; gap:10px; margin-top:15px; padding-top:13px; border-top:1px solid var(--feed-border); }
+    .store-actions .save-button { cursor:pointer; }
+    .store-actions .explore-button { min-width:125px; }
+
+    .ai-details-page {
+      position:fixed; inset:0; z-index:500;
+      display:none; overflow-y:auto;
+      background:var(--feed-bg);
+      overscroll-behavior:contain;
+    }
+    .ai-details-page.open { display:block; }
+    .details-header {
+      position:sticky; top:0; z-index:3;
+      display:flex; align-items:center; gap:15px;
+      padding:12px 17px;
+      background:rgba(7,17,31,.96);
+      border-bottom:1px solid var(--feed-border);
+      backdrop-filter:blur(18px);
+    }
+    .details-back {
+      width:40px; height:40px; flex:0 0 40px;
+      border:1px solid var(--feed-border); border-radius:50%;
+      color:white; background:#14243a; font-size:23px;
+    }
+    .details-header strong { font-size:15px; }
+    .details-content { width:min(100%,760px); margin:auto; padding:20px 18px 110px; }
+    .details-identity { display:flex; align-items:center; gap:16px; }
+    .details-icon {
+      display:grid; width:82px; height:82px; flex:0 0 82px;
+      place-items:center; border-radius:22px; font-size:38px;
+    }
+    .details-identity h1 { margin:0 0 6px; font-size:24px; letter-spacing:-.7px; }
+    .details-identity p { margin:0; color:var(--feed-muted); font-size:12px; line-height:1.5; }
+    .details-stats {
+      display:grid; grid-template-columns:repeat(3,1fr);
+      margin:23px 0; padding:16px 4px;
+      border-top:1px solid var(--feed-border);
+      border-bottom:1px solid var(--feed-border);
+    }
+    .details-stat { text-align:center; padding:0 5px; border-right:1px solid var(--feed-border); }
+    .details-stat:last-child { border:0; }
+    .details-stat strong { display:block; font-size:14px; }
+    .details-stat span { display:block; margin-top:5px; color:var(--feed-muted); font-size:10px; }
+    .details-use {
+      width:100%; min-height:48px; margin:0 0 24px;
+      border:0; border-radius:13px;
+      background:var(--feed-blue); color:#061321;
+      font-weight:850; font-size:14px;
+    }
+    .details-section { margin:25px 0; }
+    .details-section h2 { margin:0 0 12px; font-size:18px; }
+    .details-section p { margin:0; color:#b6c4d7; font-size:13px; line-height:1.7; }
+    .preview-gallery {
+      display:flex; gap:12px; overflow-x:auto;
+      padding:3px 1px 12px; scrollbar-width:none;
+    }
+    .preview-gallery::-webkit-scrollbar { display:none; }
+    .preview-shot {
+      position:relative; flex:0 0 220px; height:300px;
+      overflow:hidden; padding:15px;
+      border:1px solid rgba(111,184,255,.25);
+      border-radius:17px;
+      background:linear-gradient(155deg,#172f50,#0b1526 75%);
+    }
+    .preview-top { display:flex; align-items:center; gap:8px; padding-bottom:13px; border-bottom:1px solid #ffffff18; font-size:11px; font-weight:800; }
+    .preview-mini-icon { display:grid; width:25px; height:25px; place-items:center; border-radius:8px; background:#245b91; }
+    .preview-caption { margin-top:18px; color:#9eb4ce; font-size:10px; }
+    .preview-message { margin-top:12px; padding:11px; border-radius:12px; background:#203955; color:#edf5ff; font-size:11px; line-height:1.55; }
+    .preview-reply { margin-top:10px; padding:11px; border-radius:12px; background:#14263b; color:#c1d5e9; font-size:11px; line-height:1.65; }
+    .preview-label { position:absolute; bottom:13px; left:15px; color:#8ea7c3; font-size:10px; }
+    .details-feature-list { display:grid; gap:10px; }
+    .details-feature { padding:13px; border:1px solid var(--feed-border); border-radius:12px; background:#101d30; }
+    .details-feature strong { display:block; margin-bottom:4px; font-size:13px; }
+    .details-feature span { color:var(--feed-muted); font-size:12px; line-height:1.5; }
+    .details-review-empty { padding:17px; border:1px solid var(--feed-border); border-radius:13px; color:var(--feed-muted); font-size:12px; line-height:1.6; }
+    .details-bottom { position:fixed; bottom:0; left:0; right:0; z-index:4; padding:12px 18px calc(12px + env(safe-area-inset-bottom)); background:rgba(7,17,31,.97); border-top:1px solid var(--feed-border); }
+    .details-bottom button { display:block; width:min(100%,720px); min-height:47px; margin:auto; border:0; border-radius:13px; background:var(--feed-blue); color:#061321; font-weight:850; }
+    body.details-open { overflow:hidden; }
+
     @media (min-width: 700px) {
       .ai-feed { padding: 4px 18px; }
       .ai-art { min-height: 290px; }
@@ -664,12 +788,27 @@
       </div>
     </div>
 
-    <section class="ai-feed" id="aiFeed" aria-label="Discover AI feed">
-      <article class="ai-card" data-saved="false" style="padding:20px;margin:12px 0;border:1px solid #23344b;border-radius:18px;background:#101d30;color:#f4f8ff">
-        <div style="font-size:12px;letter-spacing:1px;color:#48c7ff;font-weight:800">YOUR ON-DEVICE AI</div>
-        <h2 style="margin:10px 0">My Qwen AI</h2>
-        <p style="color:#9eabc0;line-height:1.5">Chat with your Qwen 3 0.6B model running on this phone.</p>
-        <button id="openQwenChat" type="button" style="padding:11px 18px;border:0;border-radius:12px;background:#48c7ff;color:#07111f;font-weight:800">Chat with my AI</button>
+    <section class="ai-feed" id="aiFeed" aria-label="Discover AI">
+      <article class="ai-card ai-store-card" data-saved="false">
+        <button class="store-main" id="qwenDetailsButton" type="button" aria-label="View My Qwen AI details">
+          <span class="store-icon qwen-icon">Q</span>
+          <span class="store-info">
+            <strong>My Qwen AI</strong>
+            <span>OUR SEARCH · AI Assistant</span>
+            <span class="store-rating">☆ Not rated yet <i>·</i> On-device AI</span>
+          </span>
+          <span class="store-arrow">›</span>
+        </button>
+        <p class="store-description">Your personal Qwen 3 0.6B AI assistant, running directly on your phone.</p>
+        <div class="store-meta">
+          <span>📱 On-device</span>
+          <span>AI Assistant</span>
+          <span>Free to use</span>
+        </div>
+        <div class="store-actions">
+          <button class="save-button" type="button">♡ Save</button>
+          <button class="explore-button" id="qwenViewDetails" type="button">View details</button>
+        </div>
       </article>
     </section>
 
@@ -679,6 +818,85 @@
       Discoverable AI experiences can appear here when they are added.
     </div>
   </main>
+
+
+  <section class="ai-details-page" id="qwenDetailsPage" aria-label="My Qwen AI details" aria-hidden="true">
+    <header class="details-header">
+      <button class="details-back" id="qwenDetailsBack" type="button" aria-label="Back">‹</button>
+      <strong>AI details</strong>
+    </header>
+    <div class="details-content">
+      <div class="details-identity">
+        <div class="details-icon qwen-icon">Q</div>
+        <div>
+          <h1>My Qwen AI</h1>
+          <p>OUR SEARCH<br>AI Assistant · On-device AI</p>
+        </div>
+      </div>
+
+      <div class="details-stats">
+        <div class="details-stat"><strong>☆ —</strong><span>Not rated yet</span></div>
+        <div class="details-stat"><strong>—</strong><span>Public users</span></div>
+        <div class="details-stat"><strong>Free</strong><span>Access</span></div>
+      </div>
+
+      <button class="details-use" id="qwenUseAI" type="button">Use AI</button>
+
+      <section class="details-section">
+        <h2>Screenshots and preview</h2>
+        <div class="preview-gallery" aria-label="AI interface previews">
+          <div class="preview-shot">
+            <div class="preview-top"><span class="preview-mini-icon">Q</span> My Qwen AI</div>
+            <div class="preview-caption">YOUR ON-DEVICE AI</div>
+            <div class="preview-message">Hello! What can you help me with?</div>
+            <div class="preview-reply">I'm ready to help with questions, explanations, ideas and more.</div>
+            <span class="preview-label">Chat experience preview</span>
+          </div>
+          <div class="preview-shot">
+            <div class="preview-top"><span class="preview-mini-icon">Q</span> My Qwen AI</div>
+            <div class="preview-caption">ASK · LEARN · CREATE</div>
+            <div class="preview-message">Explain a topic in simple words.</div>
+            <div class="preview-reply">Ask questions and explore ideas with your local Qwen model.</div>
+            <span class="preview-label">Feature preview</span>
+          </div>
+        </div>
+        <p>These are interface previews, not uploaded product screenshots or a video. Actual media can be added later.</p>
+      </section>
+
+      <section class="details-section">
+        <h2>About this AI</h2>
+        <p>My Qwen AI is your on-device AI assistant powered by the Qwen 3 0.6B model. It runs through the OUR SEARCH app on your phone, allowing you to chat with your local model.</p>
+      </section>
+
+      <section class="details-section">
+        <h2>What you can do</h2>
+        <div class="details-feature-list">
+          <div class="details-feature"><strong>Ask questions</strong><span>Explore questions and get conversational responses.</span></div>
+          <div class="details-feature"><strong>Learn and understand</strong><span>Ask for explanations of topics and ideas.</span></div>
+          <div class="details-feature"><strong>Explore ideas</strong><span>Use a local AI assistant for brainstorming and everyday prompts.</span></div>
+          <div class="details-feature"><strong>On-device experience</strong><span>Use the Qwen model running on your phone.</span></div>
+        </div>
+      </section>
+
+      <section class="details-section">
+        <h2>Ratings and reviews</h2>
+        <div class="details-review-empty">No ratings or public reviews yet. Be among the first to share feedback when reviews become available.</div>
+      </section>
+
+      <section class="details-section">
+        <h2>Additional information</h2>
+        <div class="details-feature-list">
+          <div class="details-feature"><strong>Developer</strong><span>OUR SEARCH</span></div>
+          <div class="details-feature"><strong>Model</strong><span>Qwen 3 0.6B</span></div>
+          <div class="details-feature"><strong>Category</strong><span>AI Assistant</span></div>
+          <div class="details-feature"><strong>Execution</strong><span>On-device</span></div>
+        </div>
+      </section>
+    </div>
+    <div class="details-bottom">
+      <button id="qwenUseAIBottom" type="button">Use My Qwen AI</button>
+    </div>
+  </section>
 
   <nav class="home-switcher" aria-label="Main navigation">
     <a href="/home1.html" class="active" aria-current="page" aria-label="Home 1">
@@ -871,12 +1089,40 @@
         window.location.href = "/chat.html?" + params.toString();
       };
 
-      const openQwenButton = document.getElementById('openQwenChat');
-      if (openQwenButton) {
-        openQwenButton.addEventListener('click', () => {
-          window.openAIChat({id: 'local-qwen-0.6b', name: 'My Qwen AI'});
-        });
-      }
+      const detailsPage = document.getElementById('qwenDetailsPage');
+      const openDetails = () => {
+        if (!detailsPage) return;
+        detailsPage.classList.add('open');
+        detailsPage.setAttribute('aria-hidden', 'false');
+        document.body.classList.add('details-open');
+        document.getElementById('qwenDetailsBack').focus();
+        history.pushState({qwenDetails:true}, '', '#my-qwen-ai');
+      };
+      const closeDetails = () => {
+        if (!detailsPage || !detailsPage.classList.contains('open')) return;
+        detailsPage.classList.remove('open');
+        detailsPage.setAttribute('aria-hidden', 'true');
+        document.body.classList.remove('details-open');
+        if (location.hash === '#my-qwen-ai') history.replaceState(null, '', location.pathname + location.search);
+        document.getElementById('qwenDetailsButton').focus();
+      };
+      const useQwen = () => window.openAIChat({id:'local-qwen-0.6b',name:'My Qwen AI'});
+
+      document.getElementById('qwenDetailsButton').addEventListener('click', openDetails);
+      document.getElementById('qwenViewDetails').addEventListener('click', openDetails);
+      document.getElementById('qwenDetailsBack').addEventListener('click', closeDetails);
+      document.getElementById('qwenUseAI').addEventListener('click', useQwen);
+      document.getElementById('qwenUseAIBottom').addEventListener('click', useQwen);
+      window.addEventListener('popstate', () => {
+        if (detailsPage && detailsPage.classList.contains('open')) {
+          detailsPage.classList.remove('open');
+          detailsPage.setAttribute('aria-hidden','true');
+          document.body.classList.remove('details-open');
+        }
+      });
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeDetails();
+      });
 
       updateFeed();
     })();
