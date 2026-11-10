@@ -130,7 +130,14 @@ const $=id=>document.getElementById(id);
 const params=new URLSearchParams(location.search);
 let activeTab='people', activeChat=null, profiles=[];
 const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const readChats=()=>{try{return JSON.parse(localStorage.getItem('os_ai_chats')||'[]')}catch{return []}};
+const readChats=()=>{
+ try{
+  const stored=JSON.parse(localStorage.getItem('os_ai_chats')||'[]');
+  const chats=stored.filter(c=>Array.isArray(c.messages)?c.messages.length>0:!!c.lastMessage);
+  if(chats.length!==stored.length)localStorage.setItem('os_ai_chats',JSON.stringify(chats));
+  return chats;
+ }catch{return []}
+};
 const writeChats=items=>localStorage.setItem('os_ai_chats',JSON.stringify(items));
 function setTab(tab){
  activeTab=tab;
@@ -206,11 +213,9 @@ function openAI(aiId,historyId=null,requestedName=''){
   }
   const name=requestedName||chats.find(x=>(x.aiId||x.id)===aiId)?.name||'Selected AI';
   c={id:makeConversationId(),aiId,name,messages:[]};
-  chats.unshift(c);
-  writeChats(chats);
  }
 
- activeChat={type:'ai',id:c.id,aiId:c.aiId||aiId,name:c.name};
+ activeChat={type:'ai',id:c.id,aiId:c.aiId||aiId,name:c.name,conversation:c};
  $('convoName').textContent=c.name;
  $('convoType').textContent='ON-DEVICE QWEN AI';
  $('convoAvatar').textContent='✦';
@@ -246,10 +251,12 @@ $('composer').addEventListener('submit',async e=>{
  const input=$('messageInput'), text=input.value.trim();
  if(!text||!activeChat)return;
  if(activeChat.type!=='ai'){input.value='';return;}
- const chats=readChats(), c=chats.find(x=>x.id===activeChat.id);
+ const chats=readChats(), c=activeChat.conversation;
  if(!c)return;
  c.messages=c.messages||[];
  c.messages.push({role:'user',text});
+ if(!chats.some(x=>x.id===c.id))chats.unshift(c);
+ writeChats(chats);
  input.value='';
  $('messages').innerHTML+=`<div class="bubble">${safe(text)}</div>`;
  $('messages').scrollTop=$('messages').scrollHeight;
@@ -279,7 +286,6 @@ $('composer').addEventListener('submit',async e=>{
   writeChats(chats);
  }catch(err){
   waiting.textContent='Could not reach local Qwen: '+err.message+'. Keep the Qwen server running on this phone and allow the browser to connect to localhost.';
-  c.messages.pop();
   writeChats(chats);
  }finally{
   send.disabled=false;
