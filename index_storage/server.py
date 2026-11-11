@@ -85,11 +85,7 @@ else:
         STORAGE_ROOT
     )
 
-upload_manager = (
-    make_upload_manager(STORAGE_ROOT)
-    if STORAGE_MODE == "local"
-    else None
-)
+upload_manager = make_upload_manager(STORAGE_ROOT)
 
 REVERSE_COMMANDS = queue.Queue()
 
@@ -280,7 +276,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def _get_upload_status(self, upload_id):
-        if STORAGE_MODE != "local" or upload_manager is None:
+        if upload_manager is None:
             self._send_json(503, {"error": "resumable_uploads_require_local_mode"})
             return
 
@@ -489,7 +485,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
         )
 
     def _start_model_upload(self):
-        if STORAGE_MODE != "local" or upload_manager is None:
+        if upload_manager is None:
             self._send_json(503, {"error": "resumable_uploads_require_local_mode"})
             return
 
@@ -517,7 +513,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
             self._upload_error(exc)
 
     def _complete_model_upload(self, upload_id):
-        if STORAGE_MODE != "local" or upload_manager is None:
+        if upload_manager is None:
             self._send_json(503, {"error": "resumable_uploads_require_local_mode"})
             return
 
@@ -687,7 +683,7 @@ class StorageHTTPHandler(BaseHTTPRequestHandler):
         )
 
     def _put_upload_chunk(self, upload_id, index):
-        if STORAGE_MODE != "local" or upload_manager is None:
+        if upload_manager is None:
             self._send_json(503, {"error": "resumable_uploads_require_local_mode"})
             return
 

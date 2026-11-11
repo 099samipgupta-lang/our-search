@@ -142,11 +142,10 @@ class ReverseIndexStorage(IndexStorageBackend):
                 f"reverse storage PUT failed: {result}"
             )
 
-    def get(self, key):
+    def _get_raw(self, key):
+        import base64
 
-        result = self._command(
-            "GET " + key
-        )
+        result = self._command("GET " + key)
 
         if result == "NOT_FOUND":
             return None
@@ -166,6 +165,66 @@ class ReverseIndexStorage(IndexStorageBackend):
                 "reverse storage GET returned invalid Base64"
             ) from exc
 
+    def get(self, key):
+        import hashlib
+        import json
+
+        data = self._get_raw(key)
+
+        if data is None:
+            return None
+
+        try:
+            manifest = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return data
+
+        if not isinstance(manifest, dict) or (
+            manifest.get("format") != "our-search-chunked-media-v1"
+        ):
+            return data
+
+        count = manifest.get("chunk_count")
+        size = manifest.get("size")
+        prefix = manifest.get("parts_prefix")
+        expected_checksum = manifest.get("sha256")
+
+        if (
+            not isinstance(count, int)
+            or isinstance(count, bool)
+            or count <= 0
+            or not isinstance(size, int)
+            or isinstance(size, bool)
+            or size <= 0
+            or not isinstance(prefix, str)
+            or not isinstance(expected_checksum, str)
+        ):
+            raise RuntimeError("Invalid chunked storage manifest")
+
+        output = bytearray()
+        digest = hashlib.sha256()
+
+        for index in range(count):
+            part = self._get_raw(
+                prefix + f"{index:08d}"
+            )
+
+            if part is None:
+                raise RuntimeError(
+                    f"Missing stored object part {index}"
+                )
+
+            output.extend(part)
+            digest.update(part)
+
+        if len(output) != size:
+            raise RuntimeError("Stored object size verification failed")
+
+        if digest.hexdigest() != expected_checksum:
+            raise RuntimeError("Stored object checksum verification failed")
+
+        return bytes(output)
+
     def exists(self, key):
 
         result = self._command(
@@ -183,15 +242,46 @@ class ReverseIndexStorage(IndexStorageBackend):
         )
 
     def delete(self, key):
+        import json
 
-        result = self._command(
-            "DELETE " + key
-        )
+        raw = self._get_raw(key)
 
+        if raw is None:
+            return False
+
+        try:
+            manifest = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            manifest = None
+
+        if (
+            isinstance(manifest, dict)
+            and manifest.get("format") == "our-search-chunked-media-v1"
+        ):
+            count = manifest.get("chunk_count")
+            prefix = manifest.get("parts_prefix")
+
+            if (
+                not isinstance(count, int)
+                or isinstance(count, bool)
+                or count < 0
+                or not isinstance(prefix, str)
+            ):
+                raise RuntimeError("Invalid chunked storage manifest")
+
+            for index in range(count):
+                result = self._command(
+                    "DELETE " + prefix + f"{index:08d}"
+                )
+                if result not in ("OK", "NOT_FOUND"):
+                    raise RuntimeError(
+                        f"Failed to delete stored object part {index}"
+                    )
+
+        result = self._command("DELETE " + key)
         return result == "OK"
 
     def list_keys(self, prefix=""):
-
         result = self._command(
             "LIST " + prefix
             if prefix
@@ -201,4 +291,85 @@ class ReverseIndexStorage(IndexStorageBackend):
         if not result:
             return []
 
-        return result.splitlines()
+        return [
+            key for key in result.splitlines()
+            if ".parts/" not in key
+        ]
+
+    def publish_staged_upload(
+        self,
+        key,
+        chunk_paths,
+        expected_size,
+        expected_checksum,
+    ):
+        import hashlib
+        import json
+        import os
+
+        transport_chunk_size = 1024 * 1024
+        part_prefix = key + ".parts/"
+        uploaded_keys = []
+        digest = hashlib.sha256()
+        actual_size = 0
+        part_index = 0
+
+        try:
+            for path in chunk_paths:
+                with open(path, "rb") as source:
+                    while True:
+                        block = source.read(transport_chunk_size)
+                        if not block:
+                            break
+
+                        digest.update(block)
+                        actual_size += len(block)
+
+                        part_key = (
+                            part_prefix
+                            + f"{part_index:08d}"
+                        )
+
+                        self.put(part_key, block)
+                        uploaded_keys.append(part_key)
+                        part_index += 1
+
+            actual_checksum = digest.hexdigest()
+
+            if actual_size != expected_size:
+                raise RuntimeError(
+                    "reverse upload size verification failed"
+                )
+
+            if actual_checksum != expected_checksum:
+                raise RuntimeError(
+                    "reverse upload checksum verification failed"
+                )
+
+            manifest = {
+                "format": "our-search-chunked-media-v1",
+                "storage_key": key,
+                "size": actual_size,
+                "sha256": actual_checksum,
+                "chunk_size": transport_chunk_size,
+                "chunk_count": part_index,
+                "parts_prefix": part_prefix,
+            }
+
+            self.put(
+                key,
+                json.dumps(
+                    manifest,
+                    separators=(",", ":"),
+                ).encode("utf-8"),
+            )
+
+            return manifest
+
+        except Exception:
+            for part_key in uploaded_keys:
+                try:
+                    self.delete(part_key)
+                except Exception:
+                    pass
+            raise
