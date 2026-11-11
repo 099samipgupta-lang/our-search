@@ -1532,6 +1532,14 @@ try:
 
     print(
         "OUR SEARCH WEBSITE + SEARCH ENGINE",
+
+    print(
+        "[DIAGNOSTIC] UPLOAD_SIGNING_SECRET present:",
+        bool(os.environ.get("UPLOAD_SIGNING_SECRET", "")),
+        "bytes:",
+        len(os.environ.get("UPLOAD_SIGNING_SECRET", "").encode("utf-8")),
+        flush=True,
+    )
         flush=True,
     )
 
