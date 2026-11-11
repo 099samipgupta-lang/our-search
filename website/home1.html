@@ -1223,7 +1223,10 @@
 
         const session = await startResponse.json().catch(() => ({}));
         if (!startResponse.ok) {
-          throw new Error(session.error || 'Could not start media upload.');
+          throw new Error(
+            (session.error || 'Could not start media upload.') +
+            (session.storage_status ? ' (storage HTTP ' + session.storage_status + ')' : '')
+          );
         }
 
         const uploadUrl = String(session.upload_url || '').replace(/\/+$/, '');
