@@ -55,8 +55,9 @@ class ResumableUploadManager:
             raise UploadError("Filename is required")
         if not isinstance(user_id, str) or not user_id:
             raise UploadError("Authenticated user is required")
-        if not isinstance(storage_key, str) or not storage_key.startswith(
-            f"ai-models/{user_id}/"
+        if not isinstance(storage_key, str) or not any(
+            storage_key.startswith(f"{prefix}/{user_id}/")
+            for prefix in ("ai-models", "ai-media")
         ):
             raise UploadError("Storage key does not belong to this user")
         if ".." in storage_key or not re.fullmatch(

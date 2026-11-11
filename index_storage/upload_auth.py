@@ -27,7 +27,7 @@ def issue_upload_token(user_id, storage_key, size, upload_id, ttl=600):
         raise UploadAuthorizationError("Invalid user")
     if not isinstance(storage_key, str):
         raise UploadAuthorizationError("Invalid storage key")
-    if not storage_key.startswith(f"ai-models/{user_id}/"):
+    if not any(storage_key.startswith(f"{prefix}/{user_id}/") for prefix in ("ai-models", "ai-media")):
         raise UploadAuthorizationError("Storage key does not belong to user")
     if ".." in storage_key or not re.fullmatch(
         r"[A-Za-z0-9._/-]+", storage_key
@@ -89,7 +89,7 @@ def verify_upload_token(token, user_id, upload_id):
         raise UploadAuthorizationError("Upload session mismatch")
 
     key = payload.get("key", "")
-    if not isinstance(key, str) or not key.startswith(f"ai-models/{user_id}/"):
+    if not isinstance(key, str) or not any(key.startswith(f"{prefix}/{user_id}/") for prefix in ("ai-models", "ai-media")):
         raise UploadAuthorizationError("Storage key ownership mismatch")
 
     return payload
