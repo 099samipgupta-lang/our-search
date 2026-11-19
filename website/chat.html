@@ -128,6 +128,7 @@ nav a span:first-child{font-size:21px}nav a.active{color:var(--cyan)}
 <script type="module">
 const $=id=>document.getElementById(id);
 const params=new URLSearchParams(location.search);
+let chatSupabase=null;
 let activeTab='people', activeChat=null, profiles=[];
 const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const readChats=()=>{
@@ -197,29 +198,33 @@ function makeConversationId(){
 }
 function openAI(aiId,historyId=null,requestedName=''){
  $('historyToggle').classList.remove('hidden');
- let chats=readChats(), c=null;
+ let chats=readChats(), c=null, aiType='local';
 
  if(historyId){
   c=chats.find(x=>x.id===historyId);
   if(!c)return;
-  if(!c.aiId){c.aiId=c.id;writeChats(chats);}
+  if(!c.aiId)c.aiId=c.id;
   aiId=c.aiId;
+  aiType=c.aiType||'local';
  }else{
-  let previous=chats.find(x=>x.id===aiId&&!x.aiId);
+  aiType=params.get('type')==='creator'?'creator':'local';
+  let previous=chats.find(x=>x.id===aiId&&!x.aiId&&aiType==='local');
   if(previous){
    previous.aiId=aiId;
    previous.id=makeConversationId();
+   previous.aiType='local';
    writeChats(chats);
   }
-  const name=requestedName||chats.find(x=>(x.aiId||x.id)===aiId)?.name||'Selected AI';
-  c={id:makeConversationId(),aiId,name,messages:[]};
+  const name=requestedName||chats.find(x=>(x.aiId||x.id)===aiId&&(x.aiType||'local')===aiType)?.name||'Selected AI';
+  c={id:makeConversationId(),aiId,aiType,name,messages:[]};
  }
-
- activeChat={type:'ai',id:c.id,aiId:c.aiId||aiId,name:c.name,conversation:c};
+ c.aiType=aiType;
+ writeChats(chats);
+ activeChat={type:'ai',id:c.id,aiId:c.aiId||aiId,aiType,name:c.name,conversation:c};
  $('convoName').textContent=c.name;
- $('convoType').textContent='ON-DEVICE QWEN AI';
+ $('convoType').textContent=aiType==='creator'?'CREATOR AI':'ON-DEVICE QWEN AI';
  $('convoAvatar').textContent='✦';
- showConversation(c.messages||[],'Local Qwen is connected through your phone. Send a message to start chatting.');
+ showConversation(c.messages||[],aiType==='creator'?'Creator AI connection selected. Send a message to start chatting.':'Local Qwen is connected through your phone. Send a message to start chatting.');
 }
 function openPerson(id){
  closeHistory();$('historyToggle').classList.add('hidden');
@@ -266,13 +271,31 @@ $('composer').addEventListener('submit',async e=>{
  waiting.className='bubble';waiting.textContent='Qwen is thinking…';
  $('messages').appendChild(waiting);
  try{
-  const response=await fetch('/ai/chat',{
-   method:'POST',
-   headers:{'Content-Type':'application/json'},
-   body:JSON.stringify({
+  const isCreatorAI=activeChat.aiType==='creator';
+  const requestHeaders={'Content-Type':'application/json'};
+  let requestBody;
+
+  if(isCreatorAI){
+   if(!chatSupabase)throw new Error('Sign-in is required to use creator AIs.');
+   const {data:sessionData,error:sessionError}=await chatSupabase.auth.getSession();
+   const accessToken=sessionData?.session?.access_token;
+   if(sessionError||!accessToken)throw new Error('Your session expired. Please sign in again.');
+   requestHeaders.Authorization='Bearer '+accessToken;
+   requestBody={
+    ai_id:activeChat.aiId,
+    messages:c.messages.map(m=>({role:m.role||'user',content:m.text}))
+   };
+  }else{
+   requestBody={
     messages:c.messages.map(m=>({role:m.role||'user',text:m.text})),
     max_tokens:192
-   })
+   };
+  }
+
+  const response=await fetch(isCreatorAI?'/api/creator-ai/chat':'/ai/chat',{
+   method:'POST',
+   headers:requestHeaders,
+   body:JSON.stringify(requestBody)
   });
   const data=await response.json();
   if(!response.ok)throw new Error(data.error||'AI server returned HTTP '+response.status);
@@ -307,8 +330,8 @@ try{
   const key=html.match(/SUPABASE_ANON_KEY\s*=\s*['"]([^'"]+)/);
   if(url&&key){
    const {createClient}=await import('https://esm.sh/@supabase/supabase-js@2');
-   const supabase=createClient(url[1],key[1]);
-   const {data}=await supabase.from('profiles').select('user_id,username,display_name,avatar_url').limit(100);
+   chatSupabase=createClient(url[1],key[1]);
+   const {data}=await chatSupabase.from('profiles').select('user_id,username,display_name,avatar_url').limit(100);
    profiles=data||[];renderPeople();
   }
  }

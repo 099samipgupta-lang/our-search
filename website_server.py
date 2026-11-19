@@ -160,7 +160,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             self.send_header(
                 "Access-Control-Allow-Headers",
-                "Content-Type",
+                "Content-Type, Authorization",
             )
 
             self.send_header(
@@ -253,7 +253,7 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
 
             self.send_header(
                 "Access-Control-Allow-Headers",
-                "Content-Type",
+                "Content-Type, Authorization",
             )
 
             self.send_header(
@@ -295,6 +295,12 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
                     search_service.health(),
                 )
 
+                return
+
+            if path == "/api/creator-ai/published":
+
+                from creator_ai_api import handle_list_published_creator_ais
+                handle_list_published_creator_ais(self)
                 return
 
             # ----------------------------------------------
@@ -676,6 +682,21 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
         )
 
         path = parsed.path
+
+        if path == "/api/creator-ai/chat":
+            from creator_ai_api import handle_creator_ai_chat
+            handle_creator_ai_chat(self)
+            return
+
+        if path == "/api/creator-ai/test-connection":
+            from creator_ai_api import handle_test_connection
+            handle_test_connection(self)
+            return
+
+        if path == "/api/creator-ai/save-connection":
+            from creator_ai_api import handle_save_connection
+            handle_save_connection(self)
+            return
 
         if path == "/model-upload/start":
             self.handle_model_upload_start()

@@ -1004,7 +1004,7 @@
 
   <script>
     (() => {
-      const cards = [...document.querySelectorAll('.ai-card')];
+      let cards = [...document.querySelectorAll('.ai-card')];
       const feed = document.getElementById('aiFeed');
       const empty = document.getElementById('emptyState');
       const savedToggle = document.getElementById('savedToggle');
@@ -1151,12 +1151,122 @@
         if (viewer.classList.contains('open') && event.key === 'ArrowLeft' && currentStory > 0) openStory(currentStory - 1);
       });
 
+
+      async function loadCreatorAIs() {
+        if (!feed) return;
+
+        try {
+          const response = await fetch("/api/creator-ai/published", {
+            headers: { "Accept": "application/json" },
+            cache: "no-store"
+          });
+          if (!response.ok) throw new Error("Request failed");
+
+          const result = await response.json();
+          if (!result.ok || !Array.isArray(result.ais)) return;
+
+          result.ais.forEach(ai => {
+            if (!ai || !ai.id || !ai.name) return;
+
+            const id = String(ai.id);
+            if (Array.from(feed.querySelectorAll(".ai-card"))
+                .some(card => card.dataset.creatorAiId === id)) return;
+
+            const card = document.createElement("article");
+            card.className = "ai-card ai-store-card";
+            card.dataset.saved = "false";
+            card.dataset.creatorAiId = id;
+
+            const main = document.createElement("button");
+            main.type = "button";
+            main.className = "store-main";
+
+            const avatar = document.createElement("span");
+            avatar.className = "store-icon";
+            avatar.textContent = String(ai.name).trim().charAt(0).toUpperCase();
+
+            const info = document.createElement("span");
+            info.className = "store-info";
+
+            const name = document.createElement("strong");
+            name.textContent = ai.name;
+
+            const owner = document.createElement("span");
+            owner.textContent = "OUR SEARCH · Creator AI";
+
+            const provider = document.createElement("span");
+            provider.className = "store-rating";
+            provider.textContent = ai.provider || "Creator published";
+
+            info.append(name, owner, provider);
+
+            const arrow = document.createElement("span");
+            arrow.className = "store-arrow";
+            arrow.textContent = "›";
+            main.append(avatar, info, arrow);
+
+            const openAI = () => window.openAIChat({
+              id: id,
+              name: String(ai.name),
+              type: "creator"
+            });
+            main.addEventListener("click", openAI);
+
+            const description = document.createElement("p");
+            description.className = "store-description";
+            description.textContent = ai.description || "Discover this creator AI.";
+
+            const meta = document.createElement("div");
+            meta.className = "store-meta";
+
+            const category = document.createElement("span");
+            category.textContent = ai.category || "AI Assistant";
+            meta.appendChild(category);
+
+            const actions = document.createElement("div");
+            actions.className = "store-actions";
+
+            const save = document.createElement("button");
+            save.type = "button";
+            save.className = "save-button";
+            save.textContent = "♡ Save";
+            save.addEventListener("click", () => {
+              const saved = card.dataset.saved === "true";
+              card.dataset.saved = String(!saved);
+              save.classList.toggle("saved", !saved);
+              save.textContent = saved ? "♡ Save" : "♥ Saved";
+              updateFeed();
+            });
+
+            const use = document.createElement("button");
+            use.type = "button";
+            use.className = "explore-button";
+            use.textContent = "Use AI";
+            use.addEventListener("click", openAI);
+
+            actions.append(save, use);
+            card.append(main, description, meta, actions);
+            feed.appendChild(card);
+            cards.push(card);
+          });
+
+          updateFeed();
+        } catch (error) {
+          console.warn("Could not load published creator AIs.");
+        }
+      }
+
       // Open a conversation with only the AI the user selected.
       window.openAIChat = function (ai) {
         if (!ai) return;
         const id = String(ai.id || ai.slug || ai.name || "selected-ai");
         const name = String(ai.name || "Selected AI");
-        const params = new URLSearchParams({ ai: id, name: name });
+        const type = ai.type === "creator" ? "creator" : "local";
+        const params = new URLSearchParams({
+          ai: id,
+          name: name,
+          type: type
+        });
         window.location.href = "/chat.html?" + params.toString();
       };
 
@@ -1178,6 +1288,7 @@
         document.getElementById('qwenDetailsButton').focus();
       };
       const useQwen = () => window.openAIChat({id:'local-qwen-0.6b',name:'My Qwen AI'});
+      loadCreatorAIs();
 
       document.getElementById('qwenDetailsButton').addEventListener('click', openDetails);
       document.getElementById('qwenViewDetails').addEventListener('click', openDetails);

@@ -3,361 +3,413 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#080d18">
 <title>AI Studio — OUR SEARCH</title>
 <style>
-:root{color-scheme:dark;--bg:#080d18;--panel:#111a2b;--line:#26344b;--cyan:#56e7f5;--muted:#9aabc2}
+:root{color-scheme:dark;--bg:#080d18;--panel:#111a2b;--panel2:#0c1422;--line:#26344b;--cyan:#56e7f5;--text:#edf5ff;--muted:#9aabc2;--green:#4ade80;--red:#fb7185}
 *{box-sizing:border-box}
-body{margin:0;background:radial-gradient(ellipse at top,#14243c,#080d18 55%);color:#edf5ff;font:16px system-ui,sans-serif;min-height:100vh}
-header{padding:20px 5%;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px}
-a{color:var(--cyan);text-decoration:none}
-main{width:min(850px,92%);margin:32px auto 70px}
-.eyebrow{color:var(--cyan);font-size:12px;letter-spacing:2px;text-transform:uppercase}
-h1{font-size:clamp(30px,6vw,46px);margin:8px 0}
-p{color:var(--muted);line-height:1.6}
-.panel{background:#101929eF;border:1px solid var(--line);border-radius:18px;padding:22px;margin:22px 0}
-label{display:block;font-weight:600;margin:17px 0 7px}
-input,textarea,select{width:100%;padding:13px;border:1px solid #34445d;border-radius:10px;background:#09111f;color:#fff;font:inherit}
-textarea{min-height:105px;resize:vertical}
-button{border:0;border-radius:10px;padding:13px 18px;font:inherit;font-weight:700;cursor:pointer}
-.primary{background:var(--cyan);color:#07121b}
-.secondary{background:#1a2940;color:#eaf6ff;border:1px solid #354763}
-button:disabled{opacity:.55;cursor:wait}
-.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px}
-.drop{border:1px dashed #54718e;border-radius:13px;padding:22px;text-align:center;background:#0a1423}
-.status{padding:12px;border-radius:10px;background:#0a1423;margin-top:15px;white-space:pre-wrap}
-.item{border-top:1px solid var(--line);padding:14px 0}
-.pill{display:inline-block;padding:4px 9px;border-radius:20px;background:#20334a;color:#aeeef5;font-size:12px}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif}
+header{height:64px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 22px;background:#0b1220}
+.brand{font-size:18px;font-weight:800;letter-spacing:.4px}
+.brand span{color:var(--cyan)}
+nav{display:flex;gap:18px}
+a{color:var(--cyan);text-decoration:none;font-size:13px}
+main{max-width:850px;margin:30px auto;padding:0 16px 60px}
+h1{font-size:27px;margin:0 0 8px}
+.subtitle{color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 25px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:15px;padding:20px;margin-bottom:18px}
+h2{font-size:17px;margin:0 0 16px}
+label{display:block;font-size:13px;color:#d8e5f6;margin:15px 0 7px}
+input,textarea,select{width:100%;background:#080f1d;border:1px solid #30415c;border-radius:9px;padding:12px;color:white;font-size:14px;outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--cyan)}
+textarea{min-height:95px;resize:vertical;line-height:1.5}
+button{border:0;border-radius:9px;padding:12px 17px;font-size:13px;font-weight:700;cursor:pointer}
+.primary{background:var(--cyan);color:#06121a}
+.secondary{background:#263850;color:#e7f2ff}
+button:disabled{opacity:.45;cursor:not-allowed}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+.help{font-size:12px;color:var(--muted);line-height:1.5;margin-top:7px}
+.status{font-size:13px;margin-top:14px;line-height:1.5;white-space:pre-wrap}
+.status.good{color:var(--green)}
+.status.bad{color:var(--red)}
+.status.info{color:var(--cyan)}
 .hidden{display:none!important}
-small{color:var(--muted)}
-footer{text-align:center;padding:25px;color:var(--muted);font-size:13px}
+.item{padding:14px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item strong{display:block;font-size:14px}
+.meta{color:var(--muted);font-size:12px;margin-top:7px}
+.pill{display:inline-block;border:1px solid var(--line);border-radius:20px;padding:4px 9px;font-size:11px;margin-top:8px;color:var(--muted)}
+#signedOut{text-align:center;padding:28px 12px}
+.empty{color:var(--muted);font-size:13px;padding:12px 0}
+.notice{border:1px solid #36516a;background:#0b1b2a;padding:12px;border-radius:9px;color:#b9d9e7;font-size:12px;line-height:1.6;margin-top:15px}
+@media(max-width:600px){header{padding:0 14px}.brand{font-size:16px}nav{gap:12px}main{margin-top:22px}.panel{padding:16px}h1{font-size:24px}}
 </style>
 </head>
 <body>
+
 <header>
-  <strong><a href="/home1.html">OUR SEARCH</a> / AI Studio</strong>
-  <a href="/profile.html">My account</a>
+  <div class="brand">OUR <span>SEARCH</span></div>
+  <nav>
+    <a href="/home1.html">Home</a>
+    <a href="/profile.html">Profile</a>
+  </nav>
 </header>
+
 <main>
-  <div class="eyebrow">Creator workspace</div>
-  <h1>Bring your AI to OUR SEARCH.</h1>
-  <p>Submit a model for review or register an AI API provider. Approved and published submissions can appear in the discovery feed.</p>
+  <h1>AI Studio</h1>
+  <p class="subtitle">Connect your AI to OUR SEARCH and make it discoverable to people on the platform.</p>
 
-  <section class="panel" id="signedOut">
-    <h2>Sign in to continue</h2>
-    <p>AI submissions are connected to your OUR SEARCH account.</p>
-    <a href="/profile.html">Open your account and sign in →</a>
+  <section id="signedOut" class="panel hidden">
+    <h2>Sign in required</h2>
+    <p class="subtitle">Sign in to your OUR SEARCH account before connecting an AI.</p>
   </section>
 
-  <section class="panel hidden" id="studio">
-    <div id="accountLine"><small>Checking account…</small></div>
-    <form id="submissionForm">
-      <label for="submissionType">What are you submitting?</label>
-      <select id="submissionType" required>
-        <option value="model_file">Upload a downloaded AI model</option>
-        <option value="api_connection">Register an external AI API provider</option>
-      </select>
+  <section id="studio" class="hidden">
+    <div class="panel">
+      <h2>Connect your AI</h2>
+      <p class="subtitle">Your AI continues running on your own infrastructure. OUR SEARCH connects to it through its API.</p>
 
-      <label for="aiName">AI name</label>
-      <input id="aiName" minlength="2" maxlength="80" required placeholder="e.g. My Language Model">
+      <form id="submissionForm">
+        <label for="aiName">AI name</label>
+        <input id="aiName" maxlength="80" required placeholder="Example: My Research Assistant">
 
-      <label for="aiDescription">Description</label>
-      <textarea id="aiDescription" maxlength="2000" placeholder="What does your AI help people do?"></textarea>
+        <label for="description">Description</label>
+        <textarea id="description" maxlength="1000" required placeholder="Describe what your AI can do"></textarea>
 
-      <label for="aiCategory">Category</label>
-      <select id="aiCategory">
-        <option value="assistant">Assistant</option>
-        <option value="creation">Creation</option>
-        <option value="learning">Learning</option>
-        <option value="coding">Coding</option>
-        <option value="science">Science</option>
-        <option value="image">Image generation</option>
-        <option value="audio">Audio</option>
-        <option value="other" selected>Other</option>
-      </select>
+        <label for="category">Category</label>
+        <select id="category" required>
+          <option value="">Choose a category</option>
+          <option>General Assistant</option>
+          <option>Education</option>
+          <option>Research</option>
+          <option>Programming</option>
+          <option>Creative</option>
+          <option>Business</option>
+          <option>Science</option>
+          <option>Other</option>
+        </select>
 
-      <div id="modelFields">
-        <label for="modelFile">Choose model file from your device</label>
-        <div class="drop">
-          <input id="modelFile" type="file"
-            accept=".gguf,.safetensors,.onnx,.pt,.pth,.bin,.model,.tflite,.mlmodel,.zip">
-          <p id="fileInfo">Select a model file downloaded to your phone.</p>
-          <small>Supported formats depend on the model runtime we add. Uploading a file does not by itself make the model runnable.</small>
+        <label for="provider">API provider</label>
+        <input id="provider" maxlength="80" required placeholder="Example: My AI Service">
+
+        <label for="endpoint">API base URL</label>
+        <input id="endpoint" type="url" maxlength="500" required placeholder="https://api.example.com/v1">
+        <div class="help">Enter the HTTPS base URL. For OpenAI-compatible APIs, OUR SEARCH will use the chat completions endpoint.</div>
+
+        <label for="apiFormat">API format</label>
+        <select id="apiFormat">
+          <option value="openai">OpenAI-compatible chat completions</option>
+        </select>
+
+        <label for="model">Model identifier</label>
+        <input id="model" maxlength="150" required placeholder="Example: my-model">
+        <div class="help">Use the model identifier expected by your API provider.</div>
+
+        <label for="authType">Authentication</label>
+        <select id="authType">
+          <option value="bearer">Bearer token</option>
+          <option value="header">Custom API-key header</option>
+          <option value="none">No authentication</option>
+        </select>
+
+        <div id="headerNameWrap" class="hidden">
+          <label for="headerName">API-key header name</label>
+          <input id="headerName" maxlength="100" placeholder="Example: x-api-key">
         </div>
-      </div>
 
-      <div id="apiFields" class="hidden">
-        <label for="apiProvider">API provider name</label>
-        <input id="apiProvider" maxlength="100" placeholder="e.g. My AI service">
-        <p><small>Do not paste an API key or password here. Secure API credential storage and connection testing will be configured separately.</small></p>
-      </div>
+        <div id="apiKeyWrap">
+          <label for="apiKey">API key</label>
+          <input id="apiKey" type="password" maxlength="2000" autocomplete="new-password" placeholder="Enter your API key">
+          <div class="help">Your key is sent to our server for connection testing. It should never be placed in a public profile or browser storage.</div>
+        </div>
 
-      <div class="actions">
-        <button class="primary" id="submitButton" type="submit">Submit for review</button>
-        <button class="secondary" id="refreshButton" type="button">Refresh my submissions</button>
-      </div>
-      <div class="status" id="formStatus" role="status" aria-live="polite">Connect the database and private storage to start submitting.</div>
-    </form>
-  </section>
+        <div class="notice">
+          Connection testing and saving require the OUR SEARCH backend API. Your AI credentials must be stored securely on the server, not in public browser data.
+        </div>
 
-  <section class="panel hidden" id="mySubmissions">
-    <h2>My submissions</h2>
-    <p>Track your submissions and review feedback.</p>
-    <div id="submissionList"></div>
+        <div class="actions">
+          <button type="button" class="secondary" id="testButton">Test connection</button>
+          <button type="submit" class="primary" id="saveButton" disabled>Save AI connection</button>
+        </div>
+
+        <div id="formStatus" class="status" role="status"></div>
+      </form>
+    </div>
+
+    <div class="panel">
+      <h2>My AI submissions</h2>
+      <div id="mySubmissions"><div class="empty">Loading your submissions...</div></div>
+      <button type="button" class="secondary" id="refreshButton">Refresh</button>
+    </div>
   </section>
 </main>
-<footer>OUR SEARCH · Discover. Create. Learn. Experience.</footer>
 
 <script type="module">
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = "https://rxhyxmfayalrjmicsomm.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_3bKiIeuQq_yVrNK59Bk96A_9Y31q8hI";
-const BUCKET = 'ai-models';
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const $ = id => document.getElementById(id);
-const supabase = SUPABASE_URL.startsWith('https://') &&
-  SUPABASE_ANON_KEY.length > 20 &&
-  !SUPABASE_ANON_KEY.includes('PASTE_')
-  ? createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
-  : null;
+const signedOut = document.getElementById("signedOut");
+const studio = document.getElementById("studio");
+const form = document.getElementById("submissionForm");
+const statusBox = document.getElementById("formStatus");
+const testButton = document.getElementById("testButton");
+const saveButton = document.getElementById("saveButton");
+const apiKeyInput = document.getElementById("apiKey");
+const authType = document.getElementById("authType");
+const headerNameWrap = document.getElementById("headerNameWrap");
+const apiKeyWrap = document.getElementById("apiKeyWrap");
 
-let currentUser = null;
+let currentSession = null;
+let stagedTestToken = null;
+let testedConfiguration = null;
 
-function status(message) { $('formStatus').textContent = message; }
-function safeText(value) { return String(value ?? ''); }
-
-function updateSubmissionType() {
-  const isModel = $('submissionType').value === 'model_file';
-  $('modelFields').classList.toggle('hidden', !isModel);
-  $('apiFields').classList.toggle('hidden', isModel);
-  $('modelFile').required = isModel;
-  $('apiProvider').required = !isModel;
+function setStatus(message, type = "info") {
+  statusBox.textContent = message;
+  statusBox.className = "status " + type;
 }
-$('submissionType').addEventListener('change', updateSubmissionType);
-$('modelFile').addEventListener('change', () => {
-  const file = $('modelFile').files[0];
-  $('fileInfo').textContent = file
-    ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`
-    : 'Select a model file downloaded to your phone.';
-});
+
+function invalidateTest() {
+  stagedTestToken = null;
+  testedConfiguration = null;
+  saveButton.disabled = true;
+}
+
+function getConfiguration() {
+  return {
+    provider: document.getElementById("provider").value.trim(),
+    endpoint_url: document.getElementById("endpoint").value.trim(),
+    api_format: document.getElementById("apiFormat").value,
+    model: document.getElementById("model").value.trim(),
+    auth_type: authType.value,
+    api_key: authType.value === "none" ? "" : apiKeyInput.value,
+    header_name: authType.value === "header"
+      ? document.getElementById("headerName").value.trim()
+      : ""
+  };
+}
+
+function configurationFingerprint(config) {
+  return JSON.stringify({
+    provider: config.provider,
+    endpoint_url: config.endpoint_url,
+    api_format: config.api_format,
+    model: config.model,
+    auth_type: config.auth_type,
+    header_name: config.header_name
+  });
+}
+
+async function getAccessToken() {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) throw error;
+  const session = data.session;
+  if (!session?.access_token) throw new Error("Your session has expired. Please sign in again.");
+  return session.access_token;
+}
+
+async function backendRequest(path, payload) {
+  const token = await getAccessToken();
+  const response = await fetch(path, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + token
+    },
+    body: JSON.stringify(payload)
+  });
+
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok === false) {
+    throw new Error(result.error || result.message || ("Request failed (" + response.status + ")"));
+  }
+  return result;
+}
 
 async function loadSubmissions() {
-  if (!currentUser) return;
-  $('submissionList').textContent = 'Loading submissions…';
+  const container = document.getElementById("mySubmissions");
+  container.innerHTML = '<div class="empty">Loading...</div>';
+
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) {
+    container.innerHTML = '<div class="empty">Please sign in to view submissions.</div>';
+    return;
+  }
+
   const { data, error } = await supabase
-    .from('ai_submissions')
-    .select('id,name,submission_type,status,review_note,created_at')
-    .eq('creator_id', currentUser.id)
-    .order('created_at', { ascending: false });
+    .from("ai_submissions")
+    .select("id,name,submission_type,status,review_note,created_at")
+    .eq("creator_id", userData.user.id)
+    .order("created_at", { ascending: false });
 
   if (error) {
-    $('submissionList').textContent =
-      `Could not load submissions: ${error.message}. Check that the database migration has been applied.`;
+    container.textContent = "Could not load submissions: " + error.message;
     return;
   }
-  $('submissionList').replaceChildren();
-  if (!data?.length) {
-    $('submissionList').textContent = 'No submissions yet.';
+
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="empty">You have not submitted an AI yet.</div>';
     return;
   }
+
+  container.replaceChildren();
   for (const item of data) {
-    const row = document.createElement('div');
-    row.className = 'item';
-    const name = document.createElement('strong');
-    name.textContent = item.name;
-    const pill = document.createElement('span');
-    pill.className = 'pill';
-    pill.textContent = item.status.replaceAll('_', ' ');
-    const detail = document.createElement('p');
-    detail.textContent = `${item.submission_type.replaceAll('_', ' ')} · ${new Date(item.created_at).toLocaleString()}`;
-    row.append(name, document.createTextNode(' '), pill, detail);
+    const row = document.createElement("div");
+    row.className = "item";
+
+    const name = document.createElement("strong");
+    name.textContent = item.name || "Unnamed AI";
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = (item.submission_type || "AI") + " · " +
+      (item.created_at ? new Date(item.created_at).toLocaleDateString() : "");
+
+    const pill = document.createElement("span");
+    pill.className = "pill";
+    pill.textContent = item.status || "unknown";
+
+    row.append(name, meta, pill);
+
     if (item.review_note) {
-      const note = document.createElement('p');
-      note.textContent = `Review note: ${item.review_note}`;
+      const note = document.createElement("div");
+      note.className = "meta";
+      note.textContent = item.review_note;
       row.append(note);
     }
-    $('submissionList').append(row);
+
+    container.append(row);
   }
 }
 
-async function startStudio() {
-  if (!supabase) {
-    $('signedOut').classList.remove('hidden');
-    $('signedOut').querySelector('p').textContent =
-      'Supabase configuration is missing. Configure the public URL and publishable key first.';
-    return;
-  }
-  const { data: { session }, error } = await supabase.auth.getSession();
-  if (error) console.error(error);
-  currentUser = session?.user ?? null;
-  if (!currentUser) {
-    $('signedOut').classList.remove('hidden');
-    $('studio').classList.add('hidden');
-    $('mySubmissions').classList.add('hidden');
-    return;
-  }
-  $('signedOut').classList.add('hidden');
-  $('studio').classList.remove('hidden');
-  $('mySubmissions').classList.remove('hidden');
-  $('accountLine').textContent = `Signed in as ${currentUser.email || 'OUR SEARCH creator'}`;
+async function startStudio(session) {
+  currentSession = session;
+  signedOut.classList.add("hidden");
+  studio.classList.remove("hidden");
   await loadSubmissions();
 }
 
-$('refreshButton').addEventListener('click', loadSubmissions);
+async function updateAuth() {
+  const { data } = await supabase.auth.getSession();
+  if (data.session) {
+    await startStudio(data.session);
+  } else {
+    currentSession = null;
+    studio.classList.add("hidden");
+    signedOut.classList.remove("hidden");
+  }
+}
 
-$('submissionForm').addEventListener('submit', async event => {
-  event.preventDefault();
-  if (!supabase || !currentUser) {
-    status('Please sign in first.');
+authType.addEventListener("change", () => {
+  headerNameWrap.classList.toggle("hidden", authType.value !== "header");
+  apiKeyWrap.classList.toggle("hidden", authType.value === "none");
+  invalidateTest();
+});
+
+for (const id of ["provider", "endpoint", "apiFormat", "model", "authType", "headerName", "apiKey"]) {
+  document.getElementById(id).addEventListener("input", invalidateTest);
+  document.getElementById(id).addEventListener("change", invalidateTest);
+}
+
+testButton.addEventListener("click", async () => {
+  invalidateTest();
+
+  const config = getConfiguration();
+  if (!config.provider || !config.endpoint_url || !config.model) {
+    setStatus("Please complete the provider, API URL, and model fields.", "bad");
     return;
   }
 
-  const isModel = $('submissionType').value === 'model_file';
-  const file = $('modelFile').files[0];
-  const provider = $('apiProvider').value.trim();
-
-  if (isModel && !file) {
-    status('Choose a model file first.');
-    return;
-  }
-  if (!isModel && !provider) {
-    status('Enter the API provider name.');
+  if (config.auth_type !== "none" && !config.api_key) {
+    setStatus("Please enter your API key.", "bad");
     return;
   }
 
-  $('submitButton').disabled = true;
-  status('Preparing your submission…');
-  let storagePath = null;
+  if (config.auth_type === "header" && !config.header_name) {
+    setStatus("Please enter your custom API-key header name.", "bad");
+    return;
+  }
+
+  testButton.disabled = true;
+  saveButton.disabled = true;
+  setStatus("Testing your AI connection...", "info");
 
   try {
-    if (isModel) {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
-      storagePath = `ai-models/${currentUser.id}/${crypto.randomUUID()}-${safeName}`;
-      status(`Uploading ${file.name} to your phone storage…`);
+    const result = await backendRequest("/api/creator-ai/test-connection", config);
 
-      const { data: authData, error: authError } = await supabase.auth.getSession();
-      if (authError || !authData.session?.access_token) {
-        throw new Error('Please sign in again before uploading.');
-      }
-      const startResponse = await fetch('/model-upload/start', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${authData.session.access_token}`
-        },
-        body: JSON.stringify({
-          filename: file.name,
-          size: file.size,
-          storage_key: storagePath
-        })
-      });
-
-      const startData = await startResponse.json().catch(() => ({}));
-      if (!startResponse.ok) {
-        throw new Error(`${startData.error || 'Could not start upload'} (HTTP ${startResponse.status}${startData.storage_status ? `, Storage HTTP ${startData.storage_status}` : ''})`);
-      }
-
-      const { upload_id, upload_token, upload_url, chunk_size, chunks_received } = startData;
-      if (!upload_id || !upload_token || !upload_url ||
-          !Number.isInteger(chunk_size) || chunk_size <= 0) {
-        throw new Error('The storage server returned an invalid upload session.');
-      }
-
-      const totalChunks = Math.ceil(file.size / chunk_size);
-      let uploadedBytes = Math.min(file.size, chunks_received * chunk_size);
-
-      for (let index = chunks_received; index < totalChunks; index++) {
-        const first = index * chunk_size;
-        const last = Math.min(file.size, first + chunk_size);
-        const chunk = file.slice(first, last);
-
-        status(`Uploading ${file.name}… ${Math.round((uploadedBytes / file.size) * 100)}% (part ${index + 1}/${totalChunks})`);
-
-        await new Promise((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
-          xhr.open('PUT', `${upload_url}/uploads/${encodeURIComponent(upload_id)}/chunks/${index}`);
-          xhr.setRequestHeader('Authorization', `Bearer ${upload_token}`);
-          xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-
-          xhr.upload.onprogress = (event) => {
-            if (event.lengthComputable) {
-              const current = uploadedBytes + Math.min(event.loaded, chunk.size);
-              const percent = Math.min(100, Math.round((current / file.size) * 100));
-              status(`Uploading ${file.name}… ${percent}% (part ${index + 1}/${totalChunks})`);
-            }
-          };
-
-          xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              uploadedBytes += chunk.size;
-              resolve();
-            } else {
-              reject(new Error(`Upload part ${index + 1} failed (${xhr.status}). Please try submitting again.`));
-            }
-          };
-          xhr.onerror = () => reject(new Error('Network error while uploading a part. Please check your connection and try again.'));
-          xhr.onabort = () => reject(new Error('Model upload was cancelled.'));
-          xhr.send(chunk);
-        });
-      }
-
-      status(`Verifying ${file.name}…`);
-      const completeResponse = await fetch(
-        `${upload_url}/uploads/${encodeURIComponent(upload_id)}/complete`,
-        {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${upload_token}`,
-            'Content-Type': 'application/json'
-          },
-          body: '{}'
-        }
-      );
-      const completeData = await completeResponse.json().catch(() => ({}));
-      if (!completeResponse.ok) {
-        throw new Error(completeData.error || `Could not verify and publish the upload (${completeResponse.status}).`);
-      }
+    if (!result.test_token) {
+      throw new Error("The server did not return a connection test token.");
     }
 
-    status('Saving your submission…');
-    const record = {
-      creator_id: currentUser.id,
-      name: $('aiName').value.trim(),
-      description: $('aiDescription').value.trim(),
-      category: $('aiCategory').value,
-      submission_type: isModel ? 'model_file' : 'api_connection',
-      model_storage_path: storagePath,
-      api_provider: isModel ? null : provider,
-      status: 'pending_review'
-    };
-
-    const { error: insertError } = await supabase
-      .from('ai_submissions')
-      .insert(record);
-    if (insertError) {
-      throw new Error(
-        `Submission could not be saved: ${insertError.message}. If a file uploaded, it remains private; we can clean it up after fixing the database setup.`
-      );
-    }
-
-    status('Submitted successfully! Your AI is pending review. It will not appear in the public feed until it has been approved and published.');
-    $('submissionForm').reset();
-    updateSubmissionType();
-    $('fileInfo').textContent = 'Select a model file downloaded to your phone.';
-    await loadSubmissions();
+    stagedTestToken = result.test_token;
+    testedConfiguration = configurationFingerprint(config);
+    apiKeyInput.value = "";
+    setStatus(result.message || "Connection successful. You can now save your AI connection.", "good");
+    saveButton.disabled = false;
   } catch (error) {
-    status(error.message || 'Something went wrong. Please try again.');
+    setStatus("Connection test failed: " + error.message, "bad");
   } finally {
-    $('submitButton').disabled = false;
+    testButton.disabled = false;
   }
 });
 
-supabase?.auth.onAuthStateChange((_event, session) => {
-  currentUser = session?.user ?? null;
-  queueMicrotask(() => startStudio());
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+
+  if (!stagedTestToken) {
+    setStatus("Test your API connection before saving.", "bad");
+    return;
+  }
+
+  const name = document.getElementById("aiName").value.trim();
+  const description = document.getElementById("description").value.trim();
+  const category = document.getElementById("category").value;
+
+  if (!name || !description || !category) {
+    setStatus("Please complete the AI name, description, and category.", "bad");
+    return;
+  }
+
+  saveButton.disabled = true;
+  setStatus("Saving your AI connection...", "info");
+
+  try {
+    const result = await backendRequest("/api/creator-ai/save-connection", {
+      test_token: stagedTestToken,
+      name,
+      description,
+      category
+    });
+
+    stagedTestToken = null;
+    testedConfiguration = null;
+    setStatus(result.message || "Your AI connection has been saved.", "good");
+    form.reset();
+    headerNameWrap.classList.add("hidden");
+    apiKeyWrap.classList.remove("hidden");
+    invalidateTest();
+    await loadSubmissions();
+  } catch (error) {
+    setStatus("Could not save connection: " + error.message, "bad");
+    saveButton.disabled = false;
+  }
 });
-updateSubmissionType();
-await startStudio();
+
+document.getElementById("refreshButton").addEventListener("click", loadSubmissions);
+
+supabase.auth.onAuthStateChange((_event, session) => {
+  if (session) {
+    startStudio(session);
+  } else {
+    currentSession = null;
+    studio.classList.add("hidden");
+    signedOut.classList.remove("hidden");
+  }
+});
+
+updateAuth();
 </script>
 </body>
 </html>
