@@ -235,10 +235,12 @@ def _supabase_request(path, payload):
 
 
 def handle_test_connection(handler):
+    stage = "authentication"
     try:
         user_id = _authenticate(
             handler.headers.get("Authorization", "")
         )
+        stage = "reading_request"
         payload = _read_payload(handler)
 
         provider = str(payload.get("provider", "")).strip()
@@ -264,16 +266,19 @@ def handle_test_connection(handler):
         elif not api_key:
             raise ValueError("api_key_required")
 
+        stage = "testing_upstream"
         _test_upstream(
             endpoint, model, auth_type, api_key, header_name
         )
 
+        stage = "encrypting_credentials"
         encrypted_key = (
             encrypt_api_key(api_key) if api_key else ""
         )
 
         token, token_hash = create_test_token()
 
+        stage = "saving_staged_connection"
         _supabase_request(
             "ai_creator_connections",
             {
