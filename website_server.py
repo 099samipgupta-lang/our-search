@@ -688,6 +688,11 @@ class WebsiteHandler(SimpleHTTPRequestHandler):
             handle_creator_ai_chat(self)
             return
 
+        if path == "/api/creator-ai/mock/v1/chat/completions":
+            from creator_ai_api import handle_mock_creator_ai
+            handle_mock_creator_ai(self)
+            return
+
         if path == "/api/creator-ai/test-connection":
             from creator_ai_api import handle_test_connection
             handle_test_connection(self)

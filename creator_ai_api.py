@@ -615,3 +615,95 @@ def handle_list_published_creator_ais(handler):
             "ok": False,
             "error": "Could not load published creator AIs.",
         })
+
+
+# ------------------------------------------------------------
+# OUR SEARCH temporary Test AI API
+# ------------------------------------------------------------
+
+_MOCK_AI_LOCK = threading.Lock()
+_MOCK_AI_REQUESTS = {}
+
+
+def handle_mock_creator_ai(handler):
+    try:
+        auth = handler.headers.get("Authorization", "")
+
+        if auth != "Bearer our-search-test-key":
+            handler.send_json(401, {
+                "error": {"message": "Invalid test API key."}
+            })
+            return
+
+        client_ip = handler.client_address[0]
+        now = time.time()
+
+        with _MOCK_AI_LOCK:
+            recent = [
+                stamp
+                for stamp in _MOCK_AI_REQUESTS.get(client_ip, [])
+                if now - stamp < 60
+            ]
+
+            if len(recent) >= 20:
+                handler.send_json(429, {
+                    "error": {"message": "Test API rate limit reached."}
+                })
+                return
+
+            recent.append(now)
+            _MOCK_AI_REQUESTS[client_ip] = recent
+
+        payload = _read_payload(handler)
+
+        model = payload.get("model")
+        messages = payload.get("messages")
+
+        if (
+            not isinstance(model, str)
+            or not model
+            or len(model) > 120
+            or not isinstance(messages, list)
+            or not messages
+            or len(messages) > 20
+        ):
+            raise ValueError("invalid_test_request")
+
+        for message in messages:
+            if (
+                not isinstance(message, dict)
+                or message.get("role") not in ("system", "user", "assistant")
+                or not isinstance(message.get("content"), str)
+                or len(message["content"]) > 4000
+            ):
+                raise ValueError("invalid_test_message")
+
+        handler.send_json(200, {
+            "id": "our-search-test-completion",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": (
+                            "Hello! This is the OUR SEARCH Test AI. "
+                            "Your API connection is working successfully."
+                        ),
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+        })
+
+    except ValueError as error:
+        handler.send_json(400, {
+            "error": {"message": str(error)}
+        })
+
+    except Exception:
+        handler.send_json(500, {
+            "error": {"message": "Test AI service error."}
+        })
